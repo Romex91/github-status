@@ -33,6 +33,7 @@ async function gh(...args) {
 
 // Store PR data between phases
 let pendingPRData = null;
+let ghUsername = null;
 
 // === Data Fetching ===
 
@@ -134,8 +135,10 @@ function buildPromptForPR(pr) {
   ].filter(Boolean);
 
   const mentionedRules = `
+- My GitHub username is: ${ghUsername}
 - For mentioned PRs: assess whether MY response or action is still needed
-- good: Conversation resolved, PR merged/closed, or no action needed from me
+- If I (${ghUsername}) have already commented or reviewed on this PR, start statusText with "RESPONDED. " and use statusClass "good"
+- good: I already responded, conversation resolved, PR merged/closed, or no action needed from me
 - warning: Conversation is ongoing and may need my input
 - bad: I was asked a question or requested an action and haven't responded`;
 
@@ -378,11 +381,13 @@ async function handleStatusStream(req, res) {
   }
 
   try {
-    const [myPRs, reviewPRs, rawMentionedPRs] = await Promise.all([
+    const [myPRs, reviewPRs, rawMentionedPRs, username] = await Promise.all([
       fetchMyPRs(log),
       fetchReviewPRs(log),
       fetchMentionedPRs(log),
+      gh('api', 'user', '--jq', '.login').then(s => s.trim()),
     ]);
+    ghUsername = username;
 
     // Deduplicate: remove mentioned PRs already in my PRs or review PRs
     const existingUrls = new Set([...myPRs, ...reviewPRs].map(pr => pr.html_url));
