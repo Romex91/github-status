@@ -232,7 +232,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, date) {
 
         .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
         .ai-toggle { cursor: pointer; color: #d29922; }
-        .ai-toggle.done { cursor: default; }
+        .ai-toggle.done { cursor: default; color: inherit; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
         .ai-toggle.loading { animation: pulse 1.5s ease-in-out infinite; }
         .ai-log {
