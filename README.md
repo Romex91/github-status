@@ -6,7 +6,7 @@ A local dashboard that shows your open GitHub PRs, PRs waiting for your review, 
 
 - Node.js
 - [`gh` CLI](https://cli.github.com/) (authenticated)
-- [`claude` CLI](https://docs.anthropic.com/en/docs/claude-code)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` CLI)
 
 ## Setup
 
