@@ -139,13 +139,15 @@ async function fetchIssueDetails(repo, number) {
 }
 
 async function fetchPRDetails(repo, number) {
-  const [detailsRaw, diffRaw] = await Promise.all([
+  const [detailsRaw, diffRaw, reviewCommentsRaw] = await Promise.all([
     gh('pr', 'view', String(number), '--repo', repo,
       '--json', 'reviewDecision,statusCheckRollup,comments,reviews,updatedAt,isDraft,mergeable,labels,body'),
     gh('pr', 'diff', String(number), '--repo', repo).catch(() => '(diff unavailable)'),
+    gh('api', `repos/${repo}/pulls/${number}/comments`, '--paginate').catch(() => '[]'),
   ]);
   const details = JSON.parse(detailsRaw);
   details.diff = diffRaw.length > 20000 ? diffRaw.slice(0, 20000) + '\n... (truncated)' : diffRaw;
+  details.reviewComments = JSON.parse(reviewCommentsRaw);
   return details;
 }
 
@@ -156,15 +158,66 @@ function buildPromptForItem(item) {
   return buildPromptForPR(item);
 }
 
+function buildTimeline(d) {
+  const entries = [];
+  const botLogins = new Set(['coderabbitai', 'shortcut-integration', 'popmenu-bot', 'cursor']);
+
+  // Issue-level comments
+  for (const c of (d.comments || [])) {
+    entries.push({
+      timestamp: c.createdAt,
+      author: c.author?.login,
+      type: 'comment',
+      threadId: null,
+      body: c.body || '',
+    });
+  }
+
+  // Review submissions
+  for (const r of (d.reviews || [])) {
+    entries.push({
+      timestamp: r.submittedAt,
+      author: r.author?.login,
+      type: `review:${r.state}`,
+      threadId: null,
+      body: r.body || '',
+    });
+  }
+
+  // Review thread comments (line-level)
+  for (const rc of (d.reviewComments || [])) {
+    entries.push({
+      timestamp: rc.created_at,
+      author: rc.user?.login,
+      type: 'review-comment',
+      threadId: rc.in_reply_to_id ? String(rc.in_reply_to_id) : null,
+      id: String(rc.id),
+      path: rc.path,
+      body: rc.body || '',
+    });
+  }
+
+  entries.sort((a, b) => new Date(a.timestamp || 0) - new Date(b.timestamp || 0));
+
+  // Filter bots, format
+  return entries
+    .filter(e => !botLogins.has(e.author))
+    .map(e => {
+      const ts = e.timestamp ? new Date(e.timestamp).toISOString().replace('T', ' ').slice(0, 16) : '?';
+      const thread = e.threadId ? ` [reply-to:${e.threadId}]` : '';
+      const id = e.id ? ` [id:${e.id}]` : '';
+      const path = e.path ? ` [${e.path}]` : '';
+      const prefix = `[${ts}] @${e.author} [${e.type}]${id}${thread}${path}`;
+      const indent = ' '.repeat(prefix.length + 1);
+      const body = e.body.slice(0, 300).replace(/\n/g, '\n' + indent);
+      return `${prefix} ${body}`;
+    });
+}
+
 function buildPromptForPR(pr) {
   const d = pr.details || {};
 
-  const comments = (d.comments || [])
-    .filter(c => c.author?.login !== 'coderabbitai')
-    .map(c => `@${c.author?.login}: ${c.body?.slice(0, 300)}`);
-
-  const reviews = (d.reviews || [])
-    .map(r => `@${r.author?.login}: ${r.state}${r.body ? ' - ' + r.body.slice(0, 200) : ''}`);
+  const timeline = buildTimeline(d);
 
   const checks = (d.statusCheckRollup || []).map(c => ({
     name: c.name || c.context || '',
@@ -185,8 +238,7 @@ function buildPromptForPR(pr) {
     `Labels: ${(d.labels || []).map(l => l.name).join(', ') || 'none'}`,
     `Days since last update: ${pr.days}`,
     `\nCI Checks:\n${checks.length ? checks.map(c => `  ${c.state} ${c.name} ${c.url}`).join('\n') : '  (none)'}`,
-    `\nReviews:\n${reviews.length ? reviews.join('\n') : '  (none)'}`,
-    `\nComments (excluding bots):\n${comments.length ? comments.join('\n') : '  (none)'}`,
+    `\nTimeline (all comments/reviews, chronological):\n${timeline.length ? timeline.join('\n') : '  (none)'}`,
     `\nPR Body:\n${(d.body || '(empty)').slice(0, 1000)}`,
     `\nDiff:\n${d.diff || '(unavailable)'}`,
   ].filter(Boolean);
@@ -196,14 +248,14 @@ function buildPromptForPR(pr) {
 - For mentioned PRs: assess whether MY response or action is still needed
 - If I (${ghUsername}) have already commented or reviewed on this PR, start statusText with "RESPONDED. " and use statusClass "good"
 - good: I already responded, conversation resolved, PR merged/closed, or no action needed from me
+- statusText should contain the most important details about the PR: ongoing discussions, unfixed issues, pending tasks, or if it's time to ping reviewers, try to pick details that are most important for me.
 - warning: Conversation is ongoing and may need my input
 - bad: I was asked a question or requested an action and haven't responded`;
 
   const standardRules = `
 - good: Approved + CI green/no CI = ready to merge
-- warning: Awaiting review with CI passing/no CI, or approved with CI failures, or CI still running
+- warning: Awaiting review with CI passing/no CI, or approved with CI failures, or CI still running. Some questions or concerns are left unanswered.
 - bad: CI failures without approval, or stale 50+ days
-- Name specific failing CI checks in statusText
 - For review-requested PRs: focus on what the reviewer needs to know`;
 
   const rules = pr.section === 'mentioned' ? mentionedRules : standardRules;
@@ -630,7 +682,8 @@ async function handleStatusStream(req, res) {
         const d = allPRs[i].details;
         const myComments = (d.comments || []).some(c => c.author?.login === username);
         const myReviews = (d.reviews || []).some(r => r.author?.login === username);
-        allPRs[i].iResponded = myComments || myReviews;
+        const myReviewComments = (d.reviewComments || []).some(rc => rc.user?.login === username);
+        allPRs[i].iResponded = myComments || myReviews || myReviewComments;
       }
     });
 
