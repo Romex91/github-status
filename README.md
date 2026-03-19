@@ -2,8 +2,7 @@
 
 A local dashboard that shows your open GitHub PRs, PRs waiting for your review, and PRs where you were mentioned — across all repositories. It uses the `gh` CLI to fetch data and `claude` CLI to generate AI-powered review summaries. Runs as a persistent service via pm2.
 
-<img width="1461" height="707" alt="image" src="https://github.com/user-attachments/assets/eb1ec482-d059-4cbd-9d68-b240aa9d3fb7" />
-
+<img width="1375" height="1323" alt="image" src="https://github.com/user-attachments/assets/6e42bfac-f8ee-4c83-97bd-8bbf9b62164a" />
 
 ## Prerequisites
 
