@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Preflight: verify claude CLI works (catches wrong node version, missing auth, etc.)
+echo "Checking claude CLI..."
+if ! claude -p "say hello" &>/dev/null; then
+  echo "ERROR: 'claude -p \"say hello\"' failed. Fix claude CLI before installing the service." >&2
+  exit 1
+fi
+echo "claude CLI OK"
+
 # Install pm2 globally if missing
 if ! command -v pm2 &>/dev/null; then
   echo "Installing pm2 globally..."
