@@ -266,10 +266,27 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     return ` <span class="state-badge" style="color:${color};border-color:${color}">${state}</span>`;
   }
 
+  function failingCiHtml(pr) {
+    const d = pr.details || {};
+    const checks = (d.statusCheckRollup || []);
+    const failing = checks.filter(c => {
+      const state = (c.conclusion || c.state || c.status || '').toUpperCase();
+      return state === 'FAILURE' || state === 'ERROR' || state === 'TIMED_OUT';
+    });
+    if (!failing.length) return '';
+    return failing.map(c => {
+      const rawName = (c.name || c.context || 'ci').replace(/^ci\/circleci:\s*/i, '');
+      const name = escapeHtml(rawName);
+      const url = c.detailsUrl || c.targetUrl || '';
+      return url ? `<a class="ci-link" href="${escapeHtml(url)}">${name}</a>` : `<span class="ci-link">${name}</span>`;
+    }).join('<br>');
+  }
+
   function prRow(pr, includeAuthor, globalIndex, includeState) {
     const repoShort = pr.repo.split('/').pop();
     const authorSpan = includeAuthor ? ` <span class="author">@${escapeHtml(pr.author)}</span>` : '';
     const stateSpan = includeState ? stateBadge(pr.state) : '';
+    const ci = failingCiHtml(pr);
     return `            <tr>
                 <td class="title-col"><span class="repo-badge">${escapeHtml(repoShort)}</span>${escapeHtml(pr.title)}${authorSpan}${stateSpan}</td>
                 <td class="link-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number}</a></td>
@@ -277,6 +294,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
                     <a href="#" class="ai-toggle" data-index="${globalIndex}" onclick="toggleLog(${globalIndex});return false">generating...</a>
                     <div class="ai-log" id="ai-log-${globalIndex}"></div>
                 </td>
+                <td class="ci-col">${ci}</td>
                 <td class="days-col days-${daysClass(pr.days)}">${pr.days}d</td>
             </tr>`;
   }
@@ -334,7 +352,8 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .days-good { color: #3fb950; }
         .days-warning { color: #d29922; }
         .days-bad { color: #f85149; }
-        .ci-link { color: #58a6ff; font-size: 11px; }
+        .ci-col { font-size: 11px; white-space: nowrap; vertical-align: top; }
+        .ci-link { color: #f85149; font-size: 11px; }
         .repo-badge { color: #58a6ff; margin-right: 4px; }
         .author { color: #8b949e; font-size: 11px; }
         .title-col { max-width: 400px; }
@@ -376,6 +395,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
                 <th>Title</th>
                 <th class="link-col">Link</th>
                 <th>Status</th>
+                <th>CI</th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
@@ -391,6 +411,7 @@ ${myRows}
                 <th>Title</th>
                 <th class="link-col">Link</th>
                 <th>Status</th>
+                <th>CI</th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
@@ -406,6 +427,7 @@ ${reviewRows}
                 <th>Title</th>
                 <th class="link-col">Link</th>
                 <th>Status</th>
+                <th>CI</th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
@@ -484,13 +506,12 @@ ${createdIssueRows}
         es.addEventListener('ai-done', function(e) {
             var d = JSON.parse(e.data);
             var cell = document.getElementById('status-' + d.index);
-            var ciLink = d.ciUrl ? ' <a class="ci-link" href="' + d.ciUrl + '">[link]</a>' : '';
             // Keep the log div, replace the toggle link with final status
             var logDiv = document.getElementById('ai-log-' + d.index);
-            logDiv.textContent += '\\n--- Result ---\\n' + JSON.stringify({statusText: d.statusText, statusClass: d.statusClass, ciUrl: d.ciUrl}, null, 2);
+            logDiv.textContent += '\\n--- Result ---\\n' + JSON.stringify({statusText: d.statusText, statusClass: d.statusClass}, null, 2);
             cell.className = 'status-col status-' + d.statusClass;
             cell.innerHTML = '<a href="#" class="ai-toggle done" onclick="toggleLog(' + d.index + ');return false">' +
-                d.statusText.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a>' + ciLink +
+                d.statusText.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a>' +
                 '<div class="ai-log' + (logDiv.classList.contains('visible') ? ' visible' : '') + '" id="ai-log-' + d.index + '">' + logDiv.innerHTML + '</div>';
             completed++;
             if (completed >= total) es.close();
