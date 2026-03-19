@@ -67,6 +67,24 @@ async function fetchReviewPRs(log) {
   return prs;
 }
 
+async function fetchMentionedPRs(log) {
+  log('Fetching PRs I was mentioned in (last 30 days)...', 'info');
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const raw = await gh('api', `search/issues?q=mentions:@me+type:pr+updated:>${since}&per_page=100&sort=updated&order=desc`);
+  const data = JSON.parse(raw);
+  const prs = data.items.map(item => ({
+    title: item.title,
+    html_url: item.html_url,
+    repo: item.repository_url.split('/').slice(-2).join('/'),
+    number: item.number,
+    author: item.user.login,
+    updated_at: item.updated_at,
+    state: item.pull_request?.merged_at ? 'merged' : item.state,
+  }));
+  log(`Found ${prs.length} mentioned PRs`, 'success');
+  return prs;
+}
+
 async function fetchPRDetails(repo, number) {
   const [detailsRaw, diffRaw] = await Promise.all([
     gh('pr', 'view', String(number), '--repo', repo,
@@ -96,10 +114,13 @@ function buildPromptForPR(pr) {
     url: c.detailsUrl || c.targetUrl || '',
   }));
 
+  const typeMap = { mine: 'My PR', review: 'Review requested from me', mentioned: 'Mentioned in this PR' };
+
   const sections = [
     `Title: ${pr.title}`,
     `Repo: ${pr.repo}`,
-    `Type: ${pr.author ? 'Review requested from me' : 'My PR'}`,
+    `Type: ${typeMap[pr.section] || 'Unknown'}`,
+    pr.state ? `PR State: ${pr.state}` : null,
     `Draft: ${d.isDraft || false}`,
     `Review decision: ${d.reviewDecision || 'NONE'}`,
     `Mergeable: ${d.mergeable || 'UNKNOWN'}`,
@@ -110,30 +131,48 @@ function buildPromptForPR(pr) {
     `\nComments (excluding bots):\n${comments.length ? comments.join('\n') : '  (none)'}`,
     `\nPR Body:\n${(d.body || '(empty)').slice(0, 1000)}`,
     `\nDiff:\n${d.diff || '(unavailable)'}`,
-  ];
+  ].filter(Boolean);
 
-  return `You are a JSON API. Analyze this GitHub PR and return ONLY a single JSON object (no markdown fences, no explanation).
+  const mentionedRules = `
+- For mentioned PRs: assess whether MY response or action is still needed
+- good: Conversation resolved, PR merged/closed, or no action needed from me
+- warning: Conversation is ongoing and may need my input
+- bad: I was asked a question or requested an action and haven't responded`;
 
-${sections.join('\n')}
-
-Return: {"statusText":"<10-20 word description of merge blocker>","statusClass":"<good|warning|bad>","ciUrl":"<failing CI URL or null>"}
-
-Rules:
+  const standardRules = `
 - good: Approved + CI green/no CI = ready to merge
 - warning: Awaiting review with CI passing/no CI, or approved with CI failures, or CI still running
 - bad: CI failures without approval, or stale 50+ days
 - Name specific failing CI checks in statusText
 - For review-requested PRs: focus on what the reviewer needs to know`;
+
+  const rules = pr.section === 'mentioned' ? mentionedRules : standardRules;
+
+  return `You are a JSON API. Analyze this GitHub PR and return ONLY a single JSON object (no markdown fences, no explanation).
+
+${sections.join('\n')}
+
+Return: {"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>","ciUrl":"<failing CI URL or null>"}
+
+Rules:${rules}`;
 }
 
 // === HTML Generation ===
 
-function buildDashboardHtml(myPRs, reviewPRs, date) {
-  function prRow(pr, includeAuthor, globalIndex) {
+function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, date) {
+  function stateBadge(state) {
+    if (!state) return '';
+    const colors = { open: '#3fb950', merged: '#a371f7', closed: '#f85149' };
+    const color = colors[state] || '#8b949e';
+    return ` <span class="state-badge" style="color:${color};border-color:${color}">${state}</span>`;
+  }
+
+  function prRow(pr, includeAuthor, globalIndex, includeState) {
     const repoShort = pr.repo.split('/').pop();
     const authorSpan = includeAuthor ? ` <span class="author">@${escapeHtml(pr.author)}</span>` : '';
+    const stateSpan = includeState ? stateBadge(pr.state) : '';
     return `            <tr>
-                <td class="title-col"><span class="repo-badge">${escapeHtml(repoShort)}</span>${escapeHtml(pr.title)}${authorSpan}</td>
+                <td class="title-col"><span class="repo-badge">${escapeHtml(repoShort)}</span>${escapeHtml(pr.title)}${authorSpan}${stateSpan}</td>
                 <td class="link-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number}</a></td>
                 <td class="status-col" id="status-${globalIndex}">
                     <a href="#" class="ai-toggle" data-index="${globalIndex}" onclick="toggleLog(${globalIndex});return false">generating...</a>
@@ -144,8 +183,9 @@ function buildDashboardHtml(myPRs, reviewPRs, date) {
   }
 
   let idx = 0;
-  const myRows = myPRs.map(pr => prRow(pr, false, idx++)).join('\n');
-  const reviewRows = reviewPRs.map(pr => prRow(pr, true, idx++)).join('\n');
+  const myRows = myPRs.map(pr => prRow(pr, false, idx++, false)).join('\n');
+  const reviewRows = reviewPRs.map(pr => prRow(pr, true, idx++, false)).join('\n');
+  const mentionedRows = mentionedPRs.map(pr => prRow(pr, true, idx++, true)).join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -187,6 +227,7 @@ function buildDashboardHtml(myPRs, reviewPRs, date) {
         .days-col { white-space: nowrap; text-align: right; }
         .footer { color: #484f58; font-size: 11px; margin-top: 20px; }
 
+        .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
         .ai-toggle { cursor: pointer; color: #d29922; }
         .ai-toggle.done { cursor: default; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
@@ -240,6 +281,21 @@ ${reviewRows}
         </tbody>
     </table>
 
+    <h2>PRs I Was Mentioned In (${mentionedPRs.length})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th class="link-col">Link</th>
+                <th>Status</th>
+                <th class="days-col">Days</th>
+            </tr>
+        </thead>
+        <tbody>
+${mentionedRows}
+        </tbody>
+    </table>
+
     <p class="footer">Generated ${date}</p>
 
     <script>
@@ -251,7 +307,7 @@ ${reviewRows}
         // Connect to AI status stream
         var es = new EventSource('/api/ai-stream');
         var completed = 0;
-        var total = ${myPRs.length + reviewPRs.length};
+        var total = ${myPRs.length + reviewPRs.length + mentionedPRs.length};
 
         es.addEventListener('ai-log', function(e) {
             var d = JSON.parse(e.data);
@@ -322,14 +378,23 @@ async function handleStatusStream(req, res) {
   }
 
   try {
-    const [myPRs, reviewPRs] = await Promise.all([
+    const [myPRs, reviewPRs, rawMentionedPRs] = await Promise.all([
       fetchMyPRs(log),
       fetchReviewPRs(log),
+      fetchMentionedPRs(log),
     ]);
 
+    // Deduplicate: remove mentioned PRs already in my PRs or review PRs
+    const existingUrls = new Set([...myPRs, ...reviewPRs].map(pr => pr.html_url));
+    const mentionedPRs = rawMentionedPRs.filter(pr => !existingUrls.has(pr.html_url));
+    if (rawMentionedPRs.length !== mentionedPRs.length) {
+      log(`Deduplicated: ${rawMentionedPRs.length - mentionedPRs.length} mentioned PRs already in other sections`, 'info');
+    }
+
     const allPRs = [
-      ...myPRs.map(pr => ({ ...pr, isMyPR: true })),
-      ...reviewPRs.map(pr => ({ ...pr, isMyPR: false })),
+      ...myPRs.map(pr => ({ ...pr, section: 'mine' })),
+      ...reviewPRs.map(pr => ({ ...pr, section: 'review' })),
+      ...mentionedPRs.map(pr => ({ ...pr, section: 'mentioned' })),
     ];
 
     log(`Fetching details for ${allPRs.length} PRs in parallel...`, 'info');
@@ -357,9 +422,10 @@ async function handleStatusStream(req, res) {
     pendingPRData = allPRs;
 
     const date = todayStr();
-    const myPRsForHtml = allPRs.filter(pr => pr.isMyPR);
-    const reviewPRsForHtml = allPRs.filter(pr => !pr.isMyPR);
-    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, date);
+    const myPRsForHtml = allPRs.filter(pr => pr.section === 'mine');
+    const reviewPRsForHtml = allPRs.filter(pr => pr.section === 'review');
+    const mentionedPRsForHtml = allPRs.filter(pr => pr.section === 'mentioned');
+    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, mentionedPRsForHtml, date);
 
     if (!closed) {
       res.write(`event: done\ndata: ${JSON.stringify({ html })}\n\n`);
@@ -401,7 +467,7 @@ function handleAIStream(req, res) {
   const env = { ...process.env };
   delete env.CLAUDECODE;
 
-  const CONCURRENCY = 5;
+  const CONCURRENCY = 19;
 
   function runOne(index) {
     return new Promise((resolve) => {
