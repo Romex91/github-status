@@ -23,7 +23,10 @@ function daysClass(days) {
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const offset = d.getTimezoneOffset();
+  d.setMinutes(d.getMinutes() - offset);
+  return d.toISOString().slice(0, 16).replace('T', ' ');
 }
 
 async function gh(...args) {
@@ -243,16 +246,18 @@ function buildPromptForPR(pr) {
     `\nDiff:\n${d.diff || '(unavailable)'}`,
   ].filter(Boolean);
 
-  const mentionedRules = `
+  const commonRules = `
 - My GitHub username is: ${ghUsername}
+- statusText should contain the most important details about the PR: ongoing discussions, unfixed issues, pending tasks, or if it's time to ping reviewers. Pick details that are most important for me.`;
+
+  const mentionedRules = `${commonRules}
 - For mentioned PRs: assess whether MY response or action is still needed
 - If I (${ghUsername}) have already commented or reviewed on this PR, start statusText with "RESPONDED. " and use statusClass "good"
 - good: I already responded, conversation resolved, PR merged/closed, or no action needed from me
-- statusText should contain the most important details about the PR: ongoing discussions, unfixed issues, pending tasks, or if it's time to ping reviewers, try to pick details that are most important for me.
 - warning: Conversation is ongoing and may need my input
 - bad: I was asked a question or requested an action and haven't responded`;
 
-  const standardRules = `
+  const standardRules = `${commonRules}
 - good: Approved + CI green/no CI = ready to merge
 - warning: Awaiting review with CI passing/no CI, or approved with CI failures, or CI still running. Some questions or concerns are left unanswered.
 - bad: CI failures without approval, or stale 50+ days
