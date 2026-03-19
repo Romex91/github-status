@@ -28,7 +28,8 @@ pm2 stop github-status 2>/dev/null || true
 pm2 delete github-status 2>/dev/null || true
 
 # Start the service
-pm2 start server.js --name github-status
+PORT="${PORT:-7777}"
+pm2 start server.js --name github-status --env PORT="$PORT"
 
 # Setup pm2 to survive reboots
 startup_cmd=$(pm2 startup 2>/dev/null | grep -o 'sudo .*$') || true
@@ -40,4 +41,4 @@ fi
 pm2 save
 
 echo ""
-echo "github-status is running at http://localhost:7777 and will survive reboots"
+echo "github-status is running at http://localhost:$PORT and will survive reboots"

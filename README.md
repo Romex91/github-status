@@ -21,6 +21,8 @@ cd github-status
 
 Open http://localhost:7777
 
+Custom port: `PORT=9999 ./enable.sh`
+
 ## Disable
 
 ```bash
