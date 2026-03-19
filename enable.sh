@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Preflight: verify gh CLI is authenticated
+echo "Checking gh CLI..."
+if ! gh auth status &>/dev/null; then
+  echo "ERROR: 'gh auth status' failed. Run 'gh auth login' first." >&2
+  exit 1
+fi
+echo "gh CLI OK"
+
 # Preflight: verify claude CLI works (catches wrong node version, missing auth, etc.)
 echo "Checking claude CLI..."
 if ! claude -p "say hello" &>/dev/null; then
