@@ -86,6 +86,58 @@ async function fetchMentionedPRs(log) {
   return prs;
 }
 
+async function fetchAssignedIssues(log) {
+  log('Fetching issues assigned to me...', 'info');
+  const raw = await gh('api', 'search/issues?q=assignee:@me+type:issue+state:open&per_page=100');
+  const data = JSON.parse(raw);
+  const issues = data.items.map(item => ({
+    title: item.title,
+    html_url: item.html_url,
+    repo: item.repository_url.split('/').slice(-2).join('/'),
+    number: item.number,
+    updated_at: item.updated_at,
+  }));
+  log(`Found ${issues.length} assigned issues`, 'success');
+  return issues;
+}
+
+async function fetchMentionedIssues(log) {
+  log('Fetching issues I was mentioned in (last 30 days)...', 'info');
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const raw = await gh('api', `search/issues?q=mentions:@me+type:issue+state:open+updated:>${since}&per_page=100&sort=updated&order=desc`);
+  const data = JSON.parse(raw);
+  const issues = data.items.map(item => ({
+    title: item.title,
+    html_url: item.html_url,
+    repo: item.repository_url.split('/').slice(-2).join('/'),
+    number: item.number,
+    updated_at: item.updated_at,
+  }));
+  log(`Found ${issues.length} mentioned issues`, 'success');
+  return issues;
+}
+
+async function fetchCreatedIssues(log) {
+  log('Fetching issues I created...', 'info');
+  const raw = await gh('api', 'search/issues?q=author:@me+type:issue+state:open&per_page=100');
+  const data = JSON.parse(raw);
+  const issues = data.items.map(item => ({
+    title: item.title,
+    html_url: item.html_url,
+    repo: item.repository_url.split('/').slice(-2).join('/'),
+    number: item.number,
+    updated_at: item.updated_at,
+  }));
+  log(`Found ${issues.length} created issues`, 'success');
+  return issues;
+}
+
+async function fetchIssueDetails(repo, number) {
+  const raw = await gh('issue', 'view', String(number), '--repo', repo,
+    '--json', 'comments,labels,body,assignees');
+  return JSON.parse(raw);
+}
+
 async function fetchPRDetails(repo, number) {
   const [detailsRaw, diffRaw] = await Promise.all([
     gh('pr', 'view', String(number), '--repo', repo,
@@ -97,7 +149,12 @@ async function fetchPRDetails(repo, number) {
   return details;
 }
 
-// === AI Status Generation (streaming per-PR) ===
+// === AI Status Generation (streaming per-PR/issue) ===
+
+function buildPromptForItem(item) {
+  if (item.isIssue) return buildPromptForIssue(item);
+  return buildPromptForPR(item);
+}
 
 function buildPromptForPR(pr) {
   const d = pr.details || {};
@@ -160,9 +217,48 @@ Return: {"statusText":"<10-20 word description>","statusClass":"<good|warning|ba
 Rules:${rules}`;
 }
 
+function buildPromptForIssue(issue) {
+  const d = issue.details || {};
+
+  const comments = (d.comments || [])
+    .filter(c => c.author?.login !== 'coderabbitai')
+    .map(c => `@${c.author?.login}: ${c.body?.slice(0, 300)}`);
+
+  const assignees = (d.assignees || []).map(a => a.login);
+
+  const typeMap = { 'assigned-issue': 'Assigned to me', 'mentioned-issue': 'Mentioned in this issue', 'created-issue': 'Created by me' };
+
+  const sections = [
+    `Title: ${issue.title}`,
+    `Repo: ${issue.repo}`,
+    `Type: ${typeMap[issue.section] || 'Unknown'}`,
+    `Labels: ${(d.labels || []).map(l => l.name).join(', ') || 'none'}`,
+    `Assignees: ${assignees.join(', ') || 'none'}`,
+    `Days since last update: ${issue.days}`,
+    `\nComments (excluding bots):\n${comments.length ? comments.join('\n') : '  (none)'}`,
+    `\nIssue Body:\n${(d.body || '(empty)').slice(0, 1000)}`,
+  ].filter(Boolean);
+
+  return `You are a JSON API. Analyze this GitHub issue and return ONLY a single JSON object (no markdown fences, no explanation).
+
+My GitHub username is: ${ghUsername}
+
+${sections.join('\n')}
+
+Return: {"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>"}
+
+Rules:
+- ALWAYS start statusText with "Waiting on @username:" or "Action needed by @username:" identifying who must act next based on the comment thread
+- If no comments exist, use the assignee(s). If no assignee, use the issue author.
+- bad: I (${ghUsername}) need to take action and haven't yet
+- warning: Issue is active, may need my attention soon, or I should check in
+- good: No action needed from me right now (waiting on others, stale/low-priority, or I already responded)
+- Be specific about what action is needed if any`;
+}
+
 // === HTML Generation ===
 
-function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, date) {
+function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, mentionedIssues, createdIssues, date) {
   function stateBadge(state) {
     if (!state) return '';
     const colors = { open: '#3fb950', merged: '#a371f7', closed: '#f85149' };
@@ -185,10 +281,26 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, date) {
             </tr>`;
   }
 
+  function issueRow(issue, globalIndex) {
+    const repoShort = issue.repo.split('/').pop();
+    return `            <tr>
+                <td class="title-col"><span class="repo-badge">${escapeHtml(repoShort)}</span>${escapeHtml(issue.title)}</td>
+                <td class="link-col"><a href="${escapeHtml(issue.html_url)}">#${issue.number}</a></td>
+                <td class="status-col" id="status-${globalIndex}">
+                    <a href="#" class="ai-toggle" data-index="${globalIndex}" onclick="toggleLog(${globalIndex});return false">generating...</a>
+                    <div class="ai-log" id="ai-log-${globalIndex}"></div>
+                </td>
+                <td class="days-col days-${daysClass(issue.days)}">${issue.days}d</td>
+            </tr>`;
+  }
+
   let idx = 0;
   const myRows = myPRs.map(pr => prRow(pr, false, idx++, false)).join('\n');
   const reviewRows = reviewPRs.map(pr => prRow(pr, true, idx++, false)).join('\n');
   const mentionedRows = mentionedPRs.map(pr => prRow(pr, true, idx++, true)).join('\n');
+  const assignedIssueRows = assignedIssues.map(i => issueRow(i, idx++)).join('\n');
+  const mentionedIssueRows = mentionedIssues.map(i => issueRow(i, idx++)).join('\n');
+  const createdIssueRows = createdIssues.map(i => issueRow(i, idx++)).join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -208,6 +320,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, date) {
             color: #c9d1d9;
         }
         h1 { font-size: 16px; margin: 0 0 12px 0; color: #c9d1d9; }
+        h1.section-heading { font-size: 20px; margin: 28px 0 8px 0; color: #c9d1d9; border-bottom: 1px solid #21262d; padding-bottom: 8px; }
         h2 { font-size: 13px; margin: 16px 0 6px 0; color: #8b949e; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
         th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid #21262d; vertical-align: top; }
@@ -254,6 +367,8 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, date) {
 <body>
     <h1>GitHub Status - ${date}</h1>
 
+    <h1 class="section-heading">Pull Requests</h1>
+
     <h2>My Open PRs (${myPRs.length})</h2>
     <table>
         <thead>
@@ -299,6 +414,53 @@ ${mentionedRows}
         </tbody>
     </table>
 
+    <h1 class="section-heading">Issues</h1>
+
+    <h2>Issues Assigned to Me (${assignedIssues.length})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th class="link-col">Link</th>
+                <th>Status</th>
+                <th class="days-col">Days</th>
+            </tr>
+        </thead>
+        <tbody>
+${assignedIssueRows}
+        </tbody>
+    </table>
+
+    <h2>Issues I Was Mentioned In (${mentionedIssues.length})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th class="link-col">Link</th>
+                <th>Status</th>
+                <th class="days-col">Days</th>
+            </tr>
+        </thead>
+        <tbody>
+${mentionedIssueRows}
+        </tbody>
+    </table>
+
+    <h2>Issues I Created (${createdIssues.length})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th class="link-col">Link</th>
+                <th>Status</th>
+                <th class="days-col">Days</th>
+            </tr>
+        </thead>
+        <tbody>
+${createdIssueRows}
+        </tbody>
+    </table>
+
     <p class="footer">Generated ${date}</p>
 
     <script>
@@ -310,7 +472,7 @@ ${mentionedRows}
         // Connect to AI status stream
         var es = new EventSource('/api/ai-stream');
         var completed = 0;
-        var total = ${myPRs.length + reviewPRs.length + mentionedPRs.length};
+        var total = ${myPRs.length + reviewPRs.length + mentionedPRs.length + assignedIssues.length + mentionedIssues.length + createdIssues.length};
 
         es.addEventListener('ai-log', function(e) {
             var d = JSON.parse(e.data);
@@ -381,11 +543,14 @@ async function handleStatusStream(req, res) {
   }
 
   try {
-    const [myPRs, reviewPRs, rawMentionedPRs, username] = await Promise.all([
+    const [myPRs, reviewPRs, rawMentionedPRs, username, assignedIssues, rawMentionedIssues, rawCreatedIssues] = await Promise.all([
       fetchMyPRs(log),
       fetchReviewPRs(log),
       fetchMentionedPRs(log),
       gh('api', 'user', '--jq', '.login').then(s => s.trim()),
+      fetchAssignedIssues(log),
+      fetchMentionedIssues(log),
+      fetchCreatedIssues(log),
     ]);
     ghUsername = username;
 
@@ -396,20 +561,39 @@ async function handleStatusStream(req, res) {
       log(`Deduplicated: ${rawMentionedPRs.length - mentionedPRs.length} mentioned PRs already in other sections`, 'info');
     }
 
+    // Deduplicate issues: remove mentioned/created that overlap with assigned
+    const assignedIssueUrls = new Set(assignedIssues.map(i => i.html_url));
+    const mentionedIssues = rawMentionedIssues.filter(i => !assignedIssueUrls.has(i.html_url));
+    const createdIssuesDeduped = rawCreatedIssues.filter(i => !assignedIssueUrls.has(i.html_url) && !mentionedIssues.some(m => m.html_url === i.html_url));
+
     const allPRs = [
       ...myPRs.map(pr => ({ ...pr, section: 'mine' })),
       ...reviewPRs.map(pr => ({ ...pr, section: 'review' })),
       ...mentionedPRs.map(pr => ({ ...pr, section: 'mentioned' })),
     ];
 
-    log(`Fetching details for ${allPRs.length} PRs in parallel...`, 'info');
+    const allIssues = [
+      ...assignedIssues.map(i => ({ ...i, section: 'assigned-issue', isIssue: true })),
+      ...mentionedIssues.map(i => ({ ...i, section: 'mentioned-issue', isIssue: true })),
+      ...createdIssuesDeduped.map(i => ({ ...i, section: 'created-issue', isIssue: true })),
+    ];
 
-    const detailResults = await Promise.allSettled(
-      allPRs.map(async (pr) => {
-        log(`  → ${pr.repo}#${pr.number}`, 'info');
-        return fetchPRDetails(pr.repo, pr.number);
-      })
-    );
+    log(`Fetching details for ${allPRs.length} PRs and ${allIssues.length} issues in parallel...`, 'info');
+
+    const [detailResults, issueDetailResults] = await Promise.all([
+      Promise.allSettled(
+        allPRs.map(async (pr) => {
+          log(`  → PR ${pr.repo}#${pr.number}`, 'info');
+          return fetchPRDetails(pr.repo, pr.number);
+        })
+      ),
+      Promise.allSettled(
+        allIssues.map(async (issue) => {
+          log(`  → Issue ${issue.repo}#${issue.number}`, 'info');
+          return fetchIssueDetails(issue.repo, issue.number);
+        })
+      ),
+    ]);
 
     detailResults.forEach((result, i) => {
       if (result.status === 'fulfilled') {
@@ -429,16 +613,30 @@ async function handleStatusStream(req, res) {
       }
     });
 
-    log('All PR details fetched. Rendering dashboard...', 'success');
+    issueDetailResults.forEach((result, i) => {
+      if (result.status === 'fulfilled') {
+        allIssues[i].details = result.value;
+      } else {
+        log(`Failed: ${allIssues[i].repo}#${allIssues[i].number}: ${result.reason?.message}`, 'error');
+        allIssues[i].details = null;
+      }
+      allIssues[i].days = daysSince(allIssues[i].updated_at);
+    });
 
-    // Store PR data for phase 2
-    pendingPRData = allPRs;
+    log('All details fetched. Rendering dashboard...', 'success');
+
+    // Store all items for phase 2 (AI streaming)
+    const allItems = [...allPRs, ...allIssues];
+    pendingPRData = allItems;
 
     const date = todayStr();
     const myPRsForHtml = allPRs.filter(pr => pr.section === 'mine');
     const reviewPRsForHtml = allPRs.filter(pr => pr.section === 'review');
     const mentionedPRsForHtml = allPRs.filter(pr => pr.section === 'mentioned');
-    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, mentionedPRsForHtml, date);
+    const assignedIssuesForHtml = allItems.filter(i => i.section === 'assigned-issue');
+    const mentionedIssuesForHtml = allItems.filter(i => i.section === 'mentioned-issue');
+    const createdIssuesForHtml = allItems.filter(i => i.section === 'created-issue');
+    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, mentionedPRsForHtml, assignedIssuesForHtml, mentionedIssuesForHtml, createdIssuesForHtml, date);
 
     if (!closed) {
       res.write(`event: done\ndata: ${JSON.stringify({ html })}\n\n`);
@@ -485,7 +683,7 @@ function handleAIStream(req, res) {
   function runOne(index) {
     return new Promise((resolve) => {
       const pr = allPRs[index];
-      const prompt = buildPromptForPR(pr);
+      const prompt = buildPromptForItem(pr);
 
       send('ai-log', { index, text: `=== Prompt ===\n${prompt}\n\n=== Claude Output ===\n` });
 

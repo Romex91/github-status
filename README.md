@@ -19,6 +19,8 @@ cd github-status
 ./enable.sh
 ```
 
+Open http://localhost:7777
+
 ## Disable
 
 ```bash
