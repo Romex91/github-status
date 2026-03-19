@@ -107,7 +107,7 @@ function buildPromptForPR(pr) {
     .map(c => `@${c.author?.login}: ${c.body?.slice(0, 300)}`);
 
   const reviews = (d.reviews || [])
-    .map(r => `@${r.author?.login}: ${r.state} - ${(r.body || '').slice(0, 200)}`);
+    .map(r => `@${r.author?.login}: ${r.state}${r.body ? ' - ' + r.body.slice(0, 200) : ''}`);
 
   const checks = (d.statusCheckRollup || []).map(c => ({
     name: c.name || c.context || '',
@@ -419,6 +419,14 @@ async function handleStatusStream(req, res) {
         allPRs[i].details = null;
       }
       allPRs[i].days = daysSince(allPRs[i].updated_at);
+
+      // Detect if I responded in mentioned PRs
+      if (allPRs[i].section === 'mentioned' && allPRs[i].details) {
+        const d = allPRs[i].details;
+        const myComments = (d.comments || []).some(c => c.author?.login === username);
+        const myReviews = (d.reviews || []).some(r => r.author?.login === username);
+        allPRs[i].iResponded = myComments || myReviews;
+      }
     });
 
     log('All PR details fetched. Rendering dashboard...', 'success');
@@ -513,10 +521,17 @@ function handleAIStream(req, res) {
             const text = stdout.trim();
             const jsonMatch = text.match(/\{[\s\S]*\}/);
             const status = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+            let statusText = status.statusText || 'Unknown';
+            let statusClass = status.statusClass || 'warning';
+            // Server-side override: prefix RESPONDED for mentioned PRs where we detected user's comments/reviews
+            if (pr.iResponded && !statusText.startsWith('RESPONDED.')) {
+              statusText = 'RESPONDED. ' + statusText;
+              statusClass = 'good';
+            }
             send('ai-done', {
               index,
-              statusText: status.statusText || 'Unknown',
-              statusClass: status.statusClass || 'warning',
+              statusText,
+              statusClass,
               ciUrl: status.ciUrl || null,
             });
           } catch (e) {
