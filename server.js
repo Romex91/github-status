@@ -416,7 +416,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     }
     return `<td class="status-col" id="status-${globalIndex}">
                     <span class="status-text">generating...</span>
-                    <br><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt</span>
+                    <br><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
   }
@@ -515,8 +515,10 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
 
         .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
         .status-text.loading { color: #d29922; }
-        .copy-prompt { cursor: pointer; color: #484f58; font-size: 10px; }
+        .copy-prompt { cursor: pointer; color: #484f58; font-size: 10px; position: relative; }
         .copy-prompt:hover { color: #58a6ff; }
+        .prompt-tooltip { display: none; position: absolute; left: 0; top: 100%; background: #161b22; border: 1px solid #30363d; border-radius: 4px; padding: 6px 8px; color: #8b949e; font-size: 11px; white-space: pre-wrap; width: max-content; max-width: 600px; max-height: 80vh; overflow-y: auto; z-index: 10; margin-top: 4px; }
+        .copy-prompt:hover .prompt-tooltip { display: block; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
         .status-text.loading { animation: pulse 1.5s ease-in-out infinite; }
 
@@ -733,7 +735,9 @@ ${createdIssueRows}
             var d = JSON.parse(e.data);
             var log = document.getElementById('ai-log-' + d.index);
             log.textContent += d.text;
-            log.scrollTop = log.scrollHeight;
+            var btn = log.parentNode.querySelector('.copy-prompt');
+            var tooltip = document.getElementById('prompt-tooltip-' + d.index);
+            if (tooltip) tooltip.textContent = log.textContent;
         });
 
         es.addEventListener('ai-done', function(e) {
@@ -741,6 +745,8 @@ ${createdIssueRows}
             var cell = document.getElementById('status-' + d.index);
             var logDiv = document.getElementById('ai-log-' + d.index);
             logDiv.textContent += '\\n--- Result ---\\n' + JSON.stringify({statusText: d.statusText, statusClass: d.statusClass}, null, 2);
+            var btn = cell.querySelector('.copy-prompt');
+            if (btn) btn.setAttribute('data-preview', logDiv.textContent.slice(0, 500) + (logDiv.textContent.length > 500 ? '...' : ''));
             var statusSpan = cell.querySelector('.status-text');
             statusSpan.className = 'status-text';
             statusSpan.textContent = d.statusText;
