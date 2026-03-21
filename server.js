@@ -560,6 +560,9 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .ci-col { width: 8%; }
         .days-col { text-align: right; width: 4%; }
         .footer { color: #484f58; font-size: 11px; margin-top: 20px; }
+        .header-links { font-size: 11px; font-weight: 400; color: #484f58; margin-left: 12px; }
+        .header-links a { color: #484f58; text-decoration: none; }
+        .header-links a:hover { color: #58a6ff; }
 
         .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
         .status-text { white-space: pre-wrap; }
@@ -592,7 +595,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
 </head>
 <body>
     ${updateHtml}
-    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''}</h1>
+    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
     <div class="fold-controls"><a onclick="foldAll()">Fold all</a><a onclick="unfoldAll()">Unfold all</a></div>
 
     <h1 class="section-heading">Pull Requests</h1>
@@ -846,15 +849,6 @@ ${createdIssueRows}
                 copyBtn.onclick = function() {
                     navigator.clipboard.writeText(d.error).then(function() { showCopyToast(copyBtn); });
                 };
-                var fileIssue = document.createElement('span');
-                fileIssue.className = 'copy-prompt';
-                fileIssue.textContent = 'file issue';
-                fileIssue.style.marginLeft = '8px';
-                fileIssue.onclick = function() {
-                    var url = 'https://github.com/Romex91/github-status/issues/new?title=' + encodeURIComponent('Error: ' + d.error.split('\\n')[0]) + '&body=' + encodeURIComponent(d.error);
-                    window.open(url, '_blank');
-                };
-                copyBtn.parentNode.insertBefore(fileIssue, copyBtn.nextSibling);
             }
         });
 
