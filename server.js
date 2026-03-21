@@ -497,15 +497,15 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .days-bad { color: #f85149; }
         .ci-col { font-size: 11px; vertical-align: top; }
         .ci-link { color: #f85149; font-size: 11px; }
-        .repo-col { font-weight: 500; width: 8%; }
+        .repo-col { font-weight: 500; width: 6%; }
         .author { color: #8b949e; font-size: 11px; }
-        .title-col { width: 30%; }
-        .status-col { font-size: 11px; width: 30%; }
-        .branch-col { font-size: 11px; width: 12%; }
+        .title-col { width: 22%; }
+        .status-col { font-size: 11px; width: 42%; }
+        .branch-col { font-size: 11px; width: 10%; }
         .branch-name { cursor: pointer; color: #8b949e; }
         .branch-name:hover { color: #58a6ff; }
         .branch-name.copied { color: #3fb950; }
-        .ci-col { width: 10%; }
+        .ci-col { width: 8%; }
         .days-col { text-align: right; width: 4%; }
         .footer { color: #484f58; font-size: 11px; margin-top: 20px; }
 
