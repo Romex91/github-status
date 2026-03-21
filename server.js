@@ -433,11 +433,13 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     const stateSpan = includeState ? stateBadge(pr.state) : '';
     const ci = failingCiHtml(pr);
     const branch = pr.details?.headRefName || '';
+    const checkoutCmd = branch ? `cd ~/${escapeHtml(repoShort)} && git fetch origin ${escapeHtml(branch)} && git checkout ${escapeHtml(branch)}` : '';
+    const checkoutSpan = checkoutCmd ? `<br><span class="checkout-cmd" onclick="copyCmd(this)" data-cmd="${checkoutCmd}">copy git checkout cmd</span>` : '';
     const color = repoColor(repoShort);
     return `            <tr>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
                 <td class="title-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number} ${escapeHtml(pr.title)}</a>${authorSpan}${stateSpan}</td>
-                <td class="branch-col"><span class="branch-name" onclick="copyBranch(this)" title="Click to copy">${escapeHtml(branch)}</span></td>
+                <td class="branch-col"><span class="branch-name" onclick="copyBranch(this)" title="Click to copy">${escapeHtml(branch)}</span>${checkoutSpan}</td>
                 ${statusCell(pr, globalIndex)}
                 <td class="ci-col">${ci}</td>
                 <td class="days-col days-${daysClass(pr.days)}">${pr.days}d</td>
@@ -507,8 +509,12 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .author { color: #8b949e; font-size: 11px; }
         .title-col { width: 22%; }
         .status-col { font-size: 11px; width: 42%; }
-        .branch-col { font-size: 11px; width: 10%; }
+        .branch-col { font-size: 11px; width: 12%; }
         .branch-name { cursor: pointer; color: #8b949e; }
+        .checkout-cmd { cursor: pointer; color: #484f58; font-size: 10px; position: relative; }
+        .checkout-cmd:hover { color: #58a6ff; }
+        .checkout-cmd.copied { color: #3fb950; }
+        .checkout-cmd:hover::before { content: attr(data-cmd); position: absolute; left: 0; bottom: 100%; background: #2d1b1b; border: 1px solid #5c3030; border-radius: 4px; padding: 4px 8px; color: #c9d1d9; font-size: 11px; white-space: nowrap; z-index: 10; margin-bottom: 4px; }
         .branch-name:hover { color: #58a6ff; }
         .branch-name.copied { color: #3fb950; }
         .ci-col { width: 8%; }
@@ -659,6 +665,20 @@ ${createdIssueRows}
         function toggleLog(index) {
             var el = document.getElementById('ai-log-' + index);
             el.classList.toggle('visible');
+        }
+
+        function copyCmd(el) {
+            var cmd = el.getAttribute('data-cmd');
+            if (!cmd) return;
+            navigator.clipboard.writeText(cmd).then(function() {
+                el.classList.add('copied');
+                var orig = el.textContent;
+                el.textContent = 'copied!';
+                setTimeout(function() {
+                    el.textContent = orig;
+                    el.classList.remove('copied');
+                }, 1000);
+            });
         }
 
         function copyBranch(el) {
