@@ -416,8 +416,9 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
       return `<td class="status-col status-bad">Fetch failed: ${escapeHtml(item.fetchError)}</td>`;
     }
     return `<td class="status-col" id="status-${globalIndex}">
-                    <a href="#" class="ai-toggle" data-index="${globalIndex}" onclick="toggleLog(${globalIndex});return false">generating...</a>
-                    <div class="ai-log" id="ai-log-${globalIndex}"></div>
+                    <span class="status-text">generating...</span>
+                    <br><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt</span>
+                    <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
   }
 
@@ -514,24 +515,11 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .footer { color: #484f58; font-size: 11px; margin-top: 20px; }
 
         .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
-        .ai-toggle { cursor: pointer; color: #d29922; }
-        .ai-toggle.done { cursor: default; color: inherit; }
+        .status-text.loading { color: #d29922; }
+        .copy-prompt { cursor: pointer; color: #484f58; font-size: 10px; }
+        .copy-prompt:hover { color: #58a6ff; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
-        .ai-toggle.loading { animation: pulse 1.5s ease-in-out infinite; }
-        .ai-log {
-            display: none;
-            margin-top: 4px;
-            padding: 6px 8px;
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 4px;
-            font-size: 11px;
-            color: #8b949e;
-            white-space: pre-wrap;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-        .ai-log.visible { display: block; }
+        .status-text.loading { animation: pulse 1.5s ease-in-out infinite; }
 
         @media (max-width: 900px) {
             table { table-layout: auto; }
@@ -673,9 +661,12 @@ ${createdIssueRows}
             document.querySelectorAll('h2').forEach(function(h) { h.classList.remove('folded'); });
         }
 
-        function toggleLog(index) {
-            var el = document.getElementById('ai-log-' + index);
-            el.classList.toggle('visible');
+        function copyPrompt(index) {
+            var log = document.getElementById('ai-log-' + index);
+            var text = log.textContent || '';
+            if (!text) return;
+            var btn = log.parentNode.querySelector('.copy-prompt');
+            navigator.clipboard.writeText(text).then(function() { showCopyToast(btn); });
         }
 
         function copyCmd(el) {
@@ -705,24 +696,6 @@ ${createdIssueRows}
             if (!text) return;
             navigator.clipboard.writeText(text).then(function() { showCopyToast(el); });
         }
-
-        document.addEventListener('keydown', function(e) {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
-                var sel = window.getSelection();
-                var node = sel.anchorNode || document.activeElement;
-                while (node && node !== document.body) {
-                    if (node.classList && node.classList.contains('ai-log')) {
-                        e.preventDefault();
-                        var range = document.createRange();
-                        range.selectNodeContents(node);
-                        sel.removeAllRanges();
-                        sel.addRange(range);
-                        return;
-                    }
-                    node = node.parentNode;
-                }
-            }
-        });
 
         // Connect to AI status stream
         var es = new EventSource('/api/ai-stream');
@@ -767,13 +740,12 @@ ${createdIssueRows}
         es.addEventListener('ai-done', function(e) {
             var d = JSON.parse(e.data);
             var cell = document.getElementById('status-' + d.index);
-            // Keep the log div, replace the toggle link with final status
             var logDiv = document.getElementById('ai-log-' + d.index);
             logDiv.textContent += '\\n--- Result ---\\n' + JSON.stringify({statusText: d.statusText, statusClass: d.statusClass}, null, 2);
+            var statusSpan = cell.querySelector('.status-text');
+            statusSpan.className = 'status-text';
+            statusSpan.textContent = d.statusText;
             cell.className = 'status-col status-' + d.statusClass;
-            cell.innerHTML = '<a href="#" class="ai-toggle done" onclick="toggleLog(' + d.index + ');return false">' +
-                d.statusText.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a>' +
-                '<div class="ai-log' + (logDiv.classList.contains('visible') ? ' visible' : '') + '" id="ai-log-' + d.index + '">' + logDiv.innerHTML + '</div>';
             completed++;
             if (completed >= total) es.close();
         });
@@ -783,9 +755,10 @@ ${createdIssueRows}
             var cell = document.getElementById('status-' + d.index);
             var logDiv = document.getElementById('ai-log-' + d.index);
             logDiv.textContent += '\\nERROR: ' + d.error;
+            var statusSpan = cell.querySelector('.status-text');
+            statusSpan.className = 'status-text';
+            statusSpan.textContent = 'Failed to generate status';
             cell.className = 'status-col status-warning';
-            cell.innerHTML = '<a href="#" class="ai-toggle done" onclick="toggleLog(' + d.index + ');return false">Failed to generate status</a>' +
-                '<div class="ai-log' + (logDiv.classList.contains('visible') ? ' visible' : '') + '" id="ai-log-' + d.index + '">' + logDiv.innerHTML + '</div>';
             completed++;
             if (completed >= total) es.close();
         });
@@ -795,11 +768,7 @@ ${createdIssueRows}
             es.close();
         };
 
-        // Auto-expand first loading status
-        document.querySelectorAll('.ai-toggle.loading').forEach(function(el) {
-            el.classList.add('loading');
-        });
-        document.querySelectorAll('.ai-toggle').forEach(function(el) {
+        document.querySelectorAll('.status-text').forEach(function(el) {
             el.classList.add('loading');
         });
     </script>
@@ -977,7 +946,7 @@ function handleAIStream(req, res) {
       // Check cache
       const cached = readCacheEntry(cacheKey);
       if (cached) {
-        send('ai-log', { index, text: `[cached — ${cached.timestamp}]\n\n=== Prompt ===\n${prompt}\n` });
+        send('ai-log', { index, text: `[AI response was cached to save tokens — ${cached.timestamp}]\n\n=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n` });
         const { statusText, statusClass } = applyOverrides(pr, cached.statusText, cached.statusClass);
         send('ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null });
         resolve();
@@ -990,7 +959,7 @@ function handleAIStream(req, res) {
         return;
       }
 
-      send('ai-log', { index, text: `=== Prompt ===\n${prompt}\n\n=== Claude Output ===\n` });
+      send('ai-log', { index, text: `=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n\n=== Claude Output ===\n` });
 
       const child = spawn('claude', ['-p', '--model', 'haiku'], {
         env,
