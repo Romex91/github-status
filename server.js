@@ -31,7 +31,18 @@ function todayStr() {
   return d.toISOString().slice(0, 16).replace('T', ' ');
 }
 
+// Emperor protects :pray:
+const CHAOS = false;
+
+function chaosDelay() {
+  if (!CHAOS) return Promise.resolve();
+  const ms = Math.floor(Math.random() * 5000);
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function gh(...args) {
+  await chaosDelay();
+  if (CHAOS && Math.random() < 0.05) throw new Error(`[CHAOS] gh ${args[0]} ${args[1] || ''} — random failure`);
   const { stdout } = await execAsync('gh', args, { maxBuffer: 10 * 1024 * 1024 });
   return stdout;
 }
@@ -353,10 +364,12 @@ const AI_CACHE_DIR = new URL('./data/ai-cache/', import.meta.url).pathname;
 mkdirSync(AI_CACHE_DIR, { recursive: true });
 
 function readCacheEntry(key) {
+  if (CHAOS && Math.random() < 0.2) { console.error(`[CHAOS] cache read failure for ${key}`); return null; }
   try { return JSON.parse(readFileSync(`${AI_CACHE_DIR}${key}.json`, 'utf8')); } catch (e) { console.error(`Failed to read cache entry ${key}: ${e.message}`); return null; }
 }
 
 function writeCacheEntry(key, entry) {
+  if (CHAOS && Math.random() < 0.2) throw new Error(`[CHAOS] cache write failure for ${key}`);
   writeFileSync(`${AI_CACHE_DIR}${key}.json`, JSON.stringify(entry, null, 2) + '\n');
 }
 
@@ -867,9 +880,10 @@ function handleAIStream(req, res) {
   }
 
   function runOne(index) {
-    return new Promise((resolve) => {
+    return new Promise(async (resolve) => {
       const pr = allPRs[index];
       if (pr.fetchError) { resolve(); return; }
+      await chaosDelay();
       const prompt = buildPromptForItem(pr);
       const cacheKey = hashPrompt(prompt);
 
@@ -879,6 +893,12 @@ function handleAIStream(req, res) {
         send('ai-log', { index, text: `[cached — ${cached.timestamp}]\n\n=== Prompt ===\n${prompt}\n` });
         const { statusText, statusClass } = applyOverrides(pr, cached.statusText, cached.statusClass);
         send('ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null });
+        resolve();
+        return;
+      }
+
+      if (CHAOS && Math.random() < 0.3) {
+        send('ai-error', { index, error: '[CHAOS] random Claude spawn failure' });
         resolve();
         return;
       }
