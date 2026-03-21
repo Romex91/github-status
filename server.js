@@ -505,8 +505,9 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .checkout-cmd { cursor: pointer; color: #484f58; font-size: 10px; position: relative; }
         .checkout-cmd:hover { color: #58a6ff; }
         .checkout-cmd.copied { color: #3fb950; }
-        .checkout-cmd:hover::before { content: attr(data-cmd); position: absolute; left: 0; bottom: 100%; background: #2d1b1b; border: 1px solid #5c3030; border-radius: 4px; padding: 4px 8px; color: #c9d1d9; font-size: 11px; white-space: nowrap; z-index: 10; margin-bottom: 4px; }
+        .checkout-cmd:hover::before { content: attr(data-cmd); position: absolute; left: 0; bottom: 100%; background: #2d1b1b; border: 1px solid #5c3030; border-radius: 4px; padding: 4px 8px; color: #c9d1d9; font-size: 11px; width: max-content; max-width: 500px; z-index: 10; margin-bottom: 4px; }
         .branch-name:hover { color: #58a6ff; }
+        .copy-toast { position: absolute; bottom: 100%; left: 0; background: #1a3a1a; border: 1px solid #3fb950; border-radius: 4px; padding: 2px 8px; color: #3fb950; font-size: 11px; white-space: nowrap; z-index: 10; margin-bottom: 4px; pointer-events: none; }
         .branch-name.copied { color: #3fb950; }
         .ci-col { width: 8%; }
         .days-col { text-align: right; width: 4%; }
@@ -681,28 +682,28 @@ ${createdIssueRows}
             var cmd = el.getAttribute('data-cmd');
             if (!cmd) return;
             navigator.clipboard.writeText(cmd).then(function() {
+                showCopyToast(el);
                 el.classList.add('copied');
-                var orig = el.textContent;
-                el.textContent = 'copied!';
                 setTimeout(function() {
-                    el.textContent = orig;
                     el.classList.remove('copied');
                 }, 1000);
             });
         }
 
+        function showCopyToast(el) {
+            var wrapper = el.closest('td') || el.parentNode;
+            wrapper.style.position = 'relative';
+            var toast = document.createElement('span');
+            toast.className = 'copy-toast';
+            toast.textContent = 'copied!';
+            wrapper.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 1000);
+        }
+
         function copyBranch(el) {
             var text = el.textContent;
             if (!text) return;
-            navigator.clipboard.writeText(text).then(function() {
-                el.classList.add('copied');
-                var orig = el.textContent;
-                el.textContent = 'copied!';
-                setTimeout(function() {
-                    el.textContent = orig;
-                    el.classList.remove('copied');
-                }, 1000);
-            });
+            navigator.clipboard.writeText(text).then(function() { showCopyToast(el); });
         }
 
         document.addEventListener('keydown', function(e) {
