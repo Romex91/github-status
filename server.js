@@ -437,7 +437,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
       return `<td class="status-col status-bad">Fetch failed: ${escapeHtml(item.fetchError)}</td>`;
     }
     return `<td class="status-col" id="status-${globalIndex}">
-                    <span class="status-text">generating...</span>
+                    <span class="status-text">waiting...</span>
                     <br><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
@@ -451,9 +451,9 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     return `            <tr>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
                 <td class="title-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number} ${escapeHtml(pr.title)}</a>${authorSpan}${stateSpan}</td>
-                <td class="branch-col status-loading" id="branch-${globalIndex}">generating...</td>
+                <td class="branch-col status-loading" id="branch-${globalIndex}">waiting...</td>
                 ${statusCell(pr, globalIndex)}
-                <td class="ci-col status-loading" id="ci-${globalIndex}">generating...</td>
+                <td class="ci-col status-loading" id="ci-${globalIndex}">waiting...</td>
                 <td class="days-col days-${daysClass(pr.days)}">${pr.days}d</td>
             </tr>`;
   }
@@ -725,6 +725,27 @@ ${createdIssueRows}
         var es = new EventSource('/api/ai-stream');
         var completed = 0;
         var total = ${myPRs.length + reviewPRs.length + mentionedPRs.length + assignedIssues.length + mentionedIssues.length + createdIssues.length};
+        var phaseTimers = {};
+
+        es.addEventListener('ai-phase', function(e) {
+            var d = JSON.parse(e.data);
+            var cell = document.getElementById('status-' + d.index);
+            if (!cell) return;
+            var statusSpan = cell.querySelector('.status-text');
+            if (!statusSpan) return;
+            var branchCell = document.getElementById('branch-' + d.index);
+            var startTime = Date.now();
+            if (phaseTimers[d.index]) clearInterval(phaseTimers[d.index]);
+            function update() {
+                var elapsed = Math.floor((Date.now() - startTime) / 1000);
+                statusSpan.textContent = 'Running \`' + d.phase + '\` for ' + elapsed + 's';
+                if (branchCell && branchCell.classList.contains('status-loading')) {
+                    branchCell.textContent = 'Running \`' + d.phase + '\` for ' + elapsed + 's';
+                }
+            }
+            update();
+            phaseTimers[d.index] = setInterval(update, 1000);
+        });
 
         es.addEventListener('pr-details', function(e) {
             var d = JSON.parse(e.data);
@@ -765,6 +786,7 @@ ${createdIssueRows}
 
         es.addEventListener('ai-done', function(e) {
             var d = JSON.parse(e.data);
+            if (phaseTimers[d.index]) { clearInterval(phaseTimers[d.index]); delete phaseTimers[d.index]; }
             var cell = document.getElementById('status-' + d.index);
             var logDiv = document.getElementById('ai-log-' + d.index);
             logDiv.textContent += '\\n--- Result ---\\n' + JSON.stringify({statusText: d.statusText, statusClass: d.statusClass}, null, 2);
@@ -780,6 +802,7 @@ ${createdIssueRows}
 
         es.addEventListener('ai-error', function(e) {
             var d = JSON.parse(e.data);
+            if (phaseTimers[d.index]) { clearInterval(phaseTimers[d.index]); delete phaseTimers[d.index]; }
             var cell = document.getElementById('status-' + d.index);
             var logDiv = document.getElementById('ai-log-' + d.index);
             logDiv.textContent += '\\nERROR: ' + d.error;
@@ -944,9 +967,11 @@ function handleAIStream(req, res) {
     // Lazy-load all details (deferred from Phase 1 for faster table render)
     if (pr.isIssue) {
       itemPhase[index] = `gh issue view ${pr.number} --repo ${pr.repo}`;
+      sendIfActive(index, 'ai-phase', { index, phase: itemPhase[index] });
       pr.details = await fetchIssueDetails(pr.repo, pr.number, signal);
     } else {
-      itemPhase[index] = `gh pr view ${pr.number} --repo ${pr.repo} + gh pr diff + gh api comments`;
+      itemPhase[index] = `gh pr view + gh pr diff + gh api comments`;
+      sendIfActive(index, 'ai-phase', { index, phase: itemPhase[index] });
       const [summary, promptData] = await Promise.all([
         fetchPRSummary(pr.repo, pr.number, signal),
         fetchPRPromptData(pr.repo, pr.number, signal),
@@ -985,6 +1010,7 @@ function handleAIStream(req, res) {
     sendIfActive(index, 'ai-log', { index, text: `=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n\n=== Claude Output ===\n` });
 
     itemPhase[index] = 'claude -p --model haiku';
+    sendIfActive(index, 'ai-phase', { index, phase: itemPhase[index] });
     const raw = await spawnClaude(prompt, signal);
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const status = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
