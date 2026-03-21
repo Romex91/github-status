@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 const execAsync = promisify(execFile);
 const PORT = process.env.PORT || 7777;
 
@@ -315,6 +316,38 @@ Rules:
 
 // === HTML Generation ===
 
+const REPO_COLORS = [
+  '#58a6ff', '#f778ba', '#7ee787', '#ffa657', '#d2a8ff',
+  '#ff7b72', '#56d4dd', '#d29922', '#e0e037', '#f0883e',
+  '#b392f0', '#85e89d', '#79e2f2', '#ffab70', '#db61a2',
+];
+
+const REPO_COLORS_PATH = new URL('./data/repo-colors.json', import.meta.url).pathname;
+
+function loadRepoColors() {
+  try { return JSON.parse(readFileSync(REPO_COLORS_PATH, 'utf8')); } catch { return {}; }
+}
+
+function saveRepoColors(map) {
+  mkdirSync(new URL('./data/', import.meta.url).pathname, { recursive: true });
+  writeFileSync(REPO_COLORS_PATH, JSON.stringify(map, null, 2) + '\n');
+}
+
+function updateRepoColors(repoNames) {
+  const saved = loadRepoColors();
+  const allRepos = [...new Set([...Object.keys(saved), ...repoNames])].sort();
+  const map = {};
+  allRepos.forEach((name, i) => { map[name] = REPO_COLORS[i % REPO_COLORS.length]; });
+  saveRepoColors(map);
+  return map;
+}
+
+let repoColorMap = loadRepoColors();
+
+function repoColor(repoName) {
+  return repoColorMap[repoName] || '#8b949e';
+}
+
 function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, mentionedIssues, createdIssues, date) {
   function stateBadge(state) {
     if (!state) return '';
@@ -345,8 +378,10 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     const stateSpan = includeState ? stateBadge(pr.state) : '';
     const ci = failingCiHtml(pr);
     const branch = pr.details?.headRefName || '';
+    const color = repoColor(repoShort);
     return `            <tr>
-                <td class="title-col"><span class="repo-badge">${escapeHtml(repoShort)}</span>${escapeHtml(pr.title)}${authorSpan}${stateSpan}</td>
+                <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
+                <td class="title-col">${escapeHtml(pr.title)}${authorSpan}${stateSpan}</td>
                 <td class="link-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number}</a></td>
                 <td class="branch-col"><span class="branch-name" onclick="copyBranch(this)" title="Click to copy">${escapeHtml(branch)}</span></td>
                 <td class="status-col" id="status-${globalIndex}">
@@ -360,8 +395,10 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
 
   function issueRow(issue, globalIndex) {
     const repoShort = issue.repo.split('/').pop();
+    const color = repoColor(repoShort);
     return `            <tr>
-                <td class="title-col"><span class="repo-badge">${escapeHtml(repoShort)}</span>${escapeHtml(issue.title)}</td>
+                <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
+                <td class="title-col">${escapeHtml(issue.title)}</td>
                 <td class="link-col"><a href="${escapeHtml(issue.html_url)}">#${issue.number}</a></td>
                 <td class="status-col" id="status-${globalIndex}">
                     <a href="#" class="ai-toggle" data-index="${globalIndex}" onclick="toggleLog(${globalIndex});return false">generating...</a>
@@ -413,7 +450,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .days-bad { color: #f85149; }
         .ci-col { font-size: 11px; white-space: nowrap; vertical-align: top; }
         .ci-link { color: #f85149; font-size: 11px; }
-        .repo-badge { color: #58a6ff; margin-right: 4px; }
+        .repo-col { white-space: nowrap; font-weight: 500; }
         .author { color: #8b949e; font-size: 11px; }
         .title-col { max-width: 400px; }
         .status-col { max-width: 500px; font-size: 11px; }
@@ -455,6 +492,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     <table>
         <thead>
             <tr>
+                <th>Repo</th>
                 <th>Title</th>
                 <th class="link-col">Link</th>
                 <th>Branch</th>
@@ -472,6 +510,7 @@ ${myRows}
     <table>
         <thead>
             <tr>
+                <th>Repo</th>
                 <th>Title</th>
                 <th class="link-col">Link</th>
                 <th>Branch</th>
@@ -489,6 +528,7 @@ ${reviewRows}
     <table>
         <thead>
             <tr>
+                <th>Repo</th>
                 <th>Title</th>
                 <th class="link-col">Link</th>
                 <th>Branch</th>
@@ -508,6 +548,7 @@ ${mentionedRows}
     <table>
         <thead>
             <tr>
+                <th>Repo</th>
                 <th>Title</th>
                 <th class="link-col">Link</th>
                 <th>Status</th>
@@ -523,6 +564,7 @@ ${assignedIssueRows}
     <table>
         <thead>
             <tr>
+                <th>Repo</th>
                 <th>Title</th>
                 <th class="link-col">Link</th>
                 <th>Status</th>
@@ -538,6 +580,7 @@ ${mentionedIssueRows}
     <table>
         <thead>
             <tr>
+                <th>Repo</th>
                 <th>Title</th>
                 <th class="link-col">Link</th>
                 <th>Status</th>
@@ -730,6 +773,10 @@ async function handleStatusStream(req, res) {
     // Store all items for phase 2 (AI streaming)
     const allItems = [...allPRs, ...allIssues];
     pendingPRData = allItems;
+
+    // Update persistent repo color assignments
+    const allRepoNames = [...new Set(allItems.map(i => i.repo.split('/').pop()))];
+    repoColorMap = updateRepoColors(allRepoNames);
 
     const date = todayStr();
     const myPRsForHtml = allPRs.filter(pr => pr.section === 'mine');
