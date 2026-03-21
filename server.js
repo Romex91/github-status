@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 const execAsync = promisify(execFile);
 const PORT = process.env.PORT || 7777;
@@ -362,6 +362,22 @@ function writeCacheEntry(key, entry) {
 
 function hashPrompt(prompt) {
   return createHash('md5').update(prompt).digest('hex');
+}
+
+function cleanAiCache(maxAgeDays = 3) {
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  let removed = 0;
+  for (const file of readdirSync(AI_CACHE_DIR)) {
+    if (!file.endsWith('.json')) continue;
+    try {
+      const entry = JSON.parse(readFileSync(`${AI_CACHE_DIR}${file}`, 'utf8'));
+      if (new Date(entry.timestamp).getTime() < cutoff) {
+        unlinkSync(`${AI_CACHE_DIR}${file}`);
+        removed++;
+      }
+    } catch { /* skip unreadable files */ }
+  }
+  if (removed > 0) console.log(`Cleaned ${removed} stale cache entries`);
 }
 
 function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, mentionedIssues, createdIssues, date) {
@@ -934,6 +950,7 @@ function handleAIStream(req, res) {
       if (running.size > 0) await Promise.race(running);
     }
 
+    cleanAiCache();
     if (!closed) res.end();
   }
 
