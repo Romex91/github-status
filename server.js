@@ -2,6 +2,7 @@ import http from 'node:http';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 const execAsync = promisify(execFile);
 const PORT = process.env.PORT || 7777;
 
@@ -346,6 +347,21 @@ let repoColorMap = loadRepoColors();
 
 function repoColor(repoName) {
   return repoColorMap[repoName] || '#8b949e';
+}
+
+const AI_CACHE_DIR = new URL('./data/ai-cache/', import.meta.url).pathname;
+mkdirSync(AI_CACHE_DIR, { recursive: true });
+
+function readCacheEntry(key) {
+  try { return JSON.parse(readFileSync(`${AI_CACHE_DIR}${key}.json`, 'utf8')); } catch { return null; }
+}
+
+function writeCacheEntry(key, entry) {
+  writeFileSync(`${AI_CACHE_DIR}${key}.json`, JSON.stringify(entry, null, 2) + '\n');
+}
+
+function hashPrompt(prompt) {
+  return createHash('md5').update(prompt).digest('hex');
 }
 
 function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, mentionedIssues, createdIssues, date) {
@@ -821,10 +837,28 @@ function handleAIStream(req, res) {
 
   const CONCURRENCY = 19;
 
+  function applyOverrides(pr, statusText, statusClass) {
+    if (pr.iResponded && !statusText.startsWith('RESPONDED.')) {
+      return { statusText: 'RESPONDED. ' + statusText, statusClass: 'good' };
+    }
+    return { statusText, statusClass };
+  }
+
   function runOne(index) {
     return new Promise((resolve) => {
       const pr = allPRs[index];
       const prompt = buildPromptForItem(pr);
+      const cacheKey = hashPrompt(prompt);
+
+      // Check cache
+      const cached = readCacheEntry(cacheKey);
+      if (cached) {
+        send('ai-log', { index, text: `[cached — ${cached.timestamp}]\n` });
+        const { statusText, statusClass } = applyOverrides(pr, cached.statusText, cached.statusClass);
+        send('ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null });
+        resolve();
+        return;
+      }
 
       send('ai-log', { index, text: `=== Prompt ===\n${prompt}\n\n=== Claude Output ===\n` });
 
@@ -860,19 +894,18 @@ function handleAIStream(req, res) {
             const text = stdout.trim();
             const jsonMatch = text.match(/\{[\s\S]*\}/);
             const status = JSON.parse(jsonMatch ? jsonMatch[0] : text);
-            let statusText = status.statusText || 'Unknown';
-            let statusClass = status.statusClass || 'warning';
-            // Server-side override: prefix RESPONDED for mentioned PRs where we detected user's comments/reviews
-            if (pr.iResponded && !statusText.startsWith('RESPONDED.')) {
-              statusText = 'RESPONDED. ' + statusText;
-              statusClass = 'good';
-            }
-            send('ai-done', {
-              index,
-              statusText,
-              statusClass,
-              ciUrl: status.ciUrl || null,
+            const rawStatusText = status.statusText || 'Unknown';
+            const rawStatusClass = status.statusClass || 'warning';
+            const rawCiUrl = status.ciUrl || null;
+            // Save cache entry immediately
+            writeCacheEntry(cacheKey, {
+              statusText: rawStatusText,
+              statusClass: rawStatusClass,
+              ciUrl: rawCiUrl,
+              timestamp: new Date().toISOString(),
             });
+            const { statusText, statusClass } = applyOverrides(pr, rawStatusText, rawStatusClass);
+            send('ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl });
           } catch (e) {
             send('ai-error', { index, error: `Parse error: ${e.message}\nRaw: ${stdout}` });
           }
