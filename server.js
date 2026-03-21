@@ -2,6 +2,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { launchChat } from './launch-chat.js';
 const PORT = process.env.PORT || 7777;
 
 // === Helpers ===
@@ -446,7 +447,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     }
     return `<td class="status-col" id="status-${globalIndex}">
                     <span class="status-text">waiting...</span>
-                    <br><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
+                    <br><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span><span class="chat-btn" onclick="chatPR(${globalIndex})">chat</span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
   }
@@ -569,6 +570,8 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .status-text.loading { color: #d29922; }
         .copy-prompt { cursor: pointer; color: #484f58; font-size: 10px; position: relative; }
         .copy-prompt:hover { color: #58a6ff; }
+        .chat-btn { cursor: pointer; color: #484f58; font-size: 10px; margin-left: 8px; }
+        .chat-btn:hover { color: #58a6ff; }
         .prompt-tooltip { display: none; position: absolute; left: 0; top: 100%; background: #161b22; border: 1px solid #30363d; border-radius: 4px; padding: 6px 8px; color: #8b949e; font-size: 11px; white-space: pre-wrap; width: max-content; max-width: 600px; max-height: 80vh; overflow-y: auto; z-index: 10; margin-top: 4px; }
         .copy-prompt:hover .prompt-tooltip { display: block; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
@@ -718,6 +721,16 @@ ${createdIssueRows}
         }
         function unfoldAll() {
             document.querySelectorAll('h2').forEach(function(h) { h.classList.remove('folded'); });
+        }
+
+        function chatPR(index) {
+            fetch('/api/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({index: index})
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.error) alert('Chat: ' + d.error);
+            });
         }
 
         function copyPrompt(index) {
@@ -1090,6 +1103,7 @@ function handleAIStream(req, res) {
     }
 
     let prompt = buildPromptForItem(pr);
+    pr.builtPrompt = prompt;
     if (CHAOS && Math.random() < 0.1) {
       prompt = 'Respond with only: CHAOS REIGNS';
     }
@@ -1284,6 +1298,33 @@ const server = http.createServer((req, res) => {
       } catch {
         res.writeHead(400);
         res.end('Bad request');
+      }
+    });
+  } else if (req.url === '/api/chat' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { index } = JSON.parse(body);
+        const pr = pendingPRData && pendingPRData[index];
+        if (!pr) { res.writeHead(404); res.end(JSON.stringify({ error: 'Item not found. Reload the page.' })); return; }
+        if (!pr.builtPrompt) { res.writeHead(400); res.end(JSON.stringify({ error: 'AI analysis not yet complete for this item.' })); return; }
+
+        launchChat({
+          prompt: pr.builtPrompt,
+          url: pr.html_url,
+          repo: pr.repo,
+          number: pr.number,
+          title: pr.title,
+          isIssue: pr.isIssue,
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{"ok":true}');
+      } catch (e) {
+        console.error('Chat launch failed:', e);
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: e.message }));
       }
     });
   } else {
