@@ -914,7 +914,7 @@ function handleAIStream(req, res) {
     return { statusText, statusClass };
   }
 
-  const RUN_ONE_TIMEOUT = CHAOS ? 3000 : 10000;
+  const RUN_ONE_TIMEOUT = CHAOS ? 5000 : 60000;
 
   function spawnClaude(prompt) {
     const cmd = 'claude -p --model haiku';
@@ -959,7 +959,7 @@ function handleAIStream(req, res) {
         const s = (c.conclusion || c.state || c.status || '').toUpperCase();
         return s === 'FAILURE' || s === 'ERROR' || s === 'TIMED_OUT';
       });
-      send('pr-details', { index, branch, repoShort, failing });
+      sendIfActive(index, 'pr-details', { index, branch, repoShort, failing });
       if (pr.section === 'mentioned') {
         const myComments = (summary.comments || []).some(c => c.author?.login === ghUsername);
         const myReviews = (summary.reviews || []).some(r => r.author?.login === ghUsername);
@@ -974,9 +974,9 @@ function handleAIStream(req, res) {
     // Check cache
     const cached = readCacheEntry(cacheKey);
     if (cached) {
-      send('ai-log', { index, text: `[AI response was cached to save tokens — ${cached.timestamp}]\n\n=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n` });
+      sendIfActive(index, 'ai-log', { index, text: `[AI response was cached to save tokens — ${cached.timestamp}]\n\n=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n` });
       const { statusText, statusClass } = applyOverrides(pr, cached.statusText, cached.statusClass);
-      send('ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null });
+      sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null });
       return;
     }
 
@@ -984,7 +984,7 @@ function handleAIStream(req, res) {
       throw new Error('[CHAOS] random Claude spawn failure');
     }
 
-    send('ai-log', { index, text: `=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n\n=== Claude Output ===\n` });
+    sendIfActive(index, 'ai-log', { index, text: `=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n\n=== Claude Output ===\n` });
 
     itemPhase[index] = 'claude -p --model haiku';
     const raw = await spawnClaude(prompt);
@@ -1000,7 +1000,7 @@ function handleAIStream(req, res) {
       timestamp: new Date().toISOString(),
     });
     const { statusText, statusClass } = applyOverrides(pr, rawStatusText, rawStatusClass);
-    send('ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl });
+    sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl });
   }
 
   const itemPhase = {};
@@ -1012,15 +1012,25 @@ function handleAIStream(req, res) {
     ]);
   }
 
+  const completed = new Set();
+  const aborted = new Set();
+
+  function sendIfActive(index, event, data) {
+    if (aborted.has(index)) return;
+    send(event, data);
+  }
+
   async function runOne(index) {
     const pr = allPRs[index];
     try {
       await withTimeout(runOneInner(index), RUN_ONE_TIMEOUT, index);
     } catch (e) {
+      aborted.add(index); // prevent zombie runOneInner from sending events
       console.error(`[${index}] ${pr.repo}#${pr.number} failed:`, e);
       if (!pr.isIssue) send('pr-details', { index, branch: '', repoShort: pr.repo.split('/').pop(), failing: [], error: e.message });
       send('ai-error', { index, error: e.message.startsWith('Timeout') ? e.message : (e.stack || e.message) });
     }
+    completed.add(index);
   }
 
   // Run with bounded concurrency
@@ -1031,23 +1041,27 @@ function handleAIStream(req, res) {
     while (queue.length > 0 || running.size > 0) {
       while (queue.length > 0 && running.size < CONCURRENCY) {
         const idx = queue.shift();
-        const p = runOne(idx).then(() => running.delete(p));
+        const p = runOne(idx)
+          .catch(e => console.error(`Unexpected runOne rejection for index ${idx}:`, e))
+          .finally(() => running.delete(p));
         running.add(p);
       }
       if (running.size > 0) await Promise.race(running);
+    }
+
+    // Mark any remaining items as errored (should not happen, but just in case)
+    for (let i = 0; i < allPRs.length; i++) {
+      if (!completed.has(i)) {
+        console.error(`Item ${i} never completed — sending error`);
+        send('ai-error', { index: i, error: 'Item was never processed' });
+      }
     }
 
     cleanAiCache();
     if (!closed) res.end();
   }
 
-  runAll().catch(err => {
-    console.error('runAll crashed:', err);
-    if (!closed) {
-      send('ai-error', { index: 0, error: `runAll crashed: ${err.stack || err.message}` });
-      res.end();
-    }
-  });
+  runAll();
 }
 
 // === Index Page ===
