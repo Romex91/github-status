@@ -724,12 +724,16 @@ ${createdIssueRows}
         }
 
         function chatPR(index) {
+            var btn = document.querySelector('[onclick="chatPR(' + index + ')"]');
+            if (btn) btn.style.pointerEvents = 'none';
             fetch('/api/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({index: index})
             }).then(function(r) { return r.json(); }).then(function(d) {
-                if (d.error) alert('Chat: ' + d.error);
+                if (btn) btn.style.pointerEvents = '';
+                if (d.error) { alert('Chat: ' + d.error); return; }
+                if (btn) showCopyToast(btn, 'opened terminal window');
             });
         }
 
@@ -753,14 +757,14 @@ ${createdIssueRows}
             });
         }
 
-        function showCopyToast(el) {
+        function showCopyToast(el, msg) {
             var wrapper = el.closest('td') || el.parentNode;
             wrapper.style.position = 'relative';
             var toast = document.createElement('span');
             toast.className = 'copy-toast';
-            toast.textContent = 'copied!';
+            toast.textContent = msg || 'copied!';
             wrapper.appendChild(toast);
-            setTimeout(function() { toast.remove(); }, 1000);
+            setTimeout(function() { toast.remove(); }, 1500);
         }
 
         function copyBranch(el) {
