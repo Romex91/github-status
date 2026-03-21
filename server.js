@@ -221,16 +221,15 @@ function buildTimeline(d) {
 
   // Filter bots, format
   return entries
-    .filter(e => !botLogins.has(e.author))
+    .filter(e => !botLogins.has(e.author) && e.body.trim())
     .map(e => {
       const ts = e.timestamp ? new Date(e.timestamp).toISOString().replace('T', ' ').slice(0, 16) : '?';
       const thread = e.threadId ? ` [reply-to:${e.threadId}]` : '';
       const id = e.id ? ` [id:${e.id}]` : '';
       const path = e.path ? ` [${e.path}]` : '';
       const prefix = `[${ts}] @${e.author} [${e.type}]${id}${thread}${path}`;
-      const indent = ' '.repeat(prefix.length + 1);
-      const body = e.body.slice(0, 300).replace(/\n/g, '\n' + indent);
-      return `${prefix} ${body}`;
+      const body = e.body.slice(0, 300).replace(/\n/g, '\n  ');
+      return `${prefix}\n  ${body}`;
     });
 }
 
@@ -262,8 +261,8 @@ function buildPromptForPR(pr) {
     `Mergeable: ${d.mergeable || 'UNKNOWN'}`,
     `Labels: ${(d.labels || []).map(l => l.name).join(', ') || 'none'}`,
     `Days since last update: ${pr.days}`,
-    `\nCI Checks:\n${checks.length ? checks.map(c => `  ${c.state} ${c.name} ${c.url}`).join('\n') : '  (none)'}`,
-    `\nTimeline (all comments/reviews, chronological):\n${timeline.length ? timeline.join('\n') : '  (none)'}`,
+    `\n# CI Checks:\n${checks.length ? checks.map(c => `  ${c.state} ${c.name} ${c.url}`).join('\n') : '  (none)'}`,
+    `\n# Timeline (all comments/reviews, chronological):\n${timeline.length ? timeline.join('\n') : '  (none)'}`,
     `\nPR Body:\n${(d.body || '(empty)').slice(0, 1000)}`,
     `\nDiff:\n${d.diff || '(unavailable)'}`,
   ].filter(Boolean);
@@ -302,7 +301,7 @@ function buildPromptForIssue(issue) {
 
   const comments = (d.comments || [])
     .filter(c => c.author?.login !== 'coderabbitai')
-    .map(c => `@${c.author?.login}: ${c.body?.slice(0, 300)}`);
+    .map(c => `@${c.author?.login}:\n  ${(c.body || '').slice(0, 300).replace(/\n/g, '\n  ')}`);
 
   const assignees = (d.assignees || []).map(a => a.login);
 
