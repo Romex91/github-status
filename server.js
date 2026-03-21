@@ -441,8 +441,9 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     const color = repoColor(repoShort);
     return `            <tr>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
-                <td class="title-col"><a href="${escapeHtml(issue.html_url)}">#${issue.number} ${escapeHtml(issue.title)}</a></td>
+                <td class="title-col" colspan="2"><a href="${escapeHtml(issue.html_url)}">#${issue.number} ${escapeHtml(issue.title)}</a></td>
                 ${statusCell(issue, globalIndex)}
+                <td class="ci-col"></td>
                 <td class="days-col days-${daysClass(issue.days)}">${issue.days}d</td>
             </tr>`;
   }
@@ -558,7 +559,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
                 <th class="repo-col">Repo</th>
                 <th class="title-col">Title</th>
                 <th class="branch-col">Branch</th>
-                <th class="status-col">Status</th>
+                <th class="status-col">AI-Status</th>
                 <th class="ci-col">CI</th>
                 <th class="days-col">Days</th>
             </tr>
@@ -576,7 +577,7 @@ ${myRows}
                 <th class="repo-col">Repo</th>
                 <th class="title-col">Title</th>
                 <th class="branch-col">Branch</th>
-                <th class="status-col">Status</th>
+                <th class="status-col">AI-Status</th>
                 <th class="ci-col">CI</th>
                 <th class="days-col">Days</th>
             </tr>
@@ -594,7 +595,7 @@ ${reviewRows}
                 <th class="repo-col">Repo</th>
                 <th class="title-col">Title</th>
                 <th class="branch-col">Branch</th>
-                <th class="status-col">Status</th>
+                <th class="status-col">AI-Status</th>
                 <th class="ci-col">CI</th>
                 <th class="days-col">Days</th>
             </tr>
@@ -613,7 +614,9 @@ ${mentionedRows}
             <tr>
                 <th class="repo-col">Repo</th>
                 <th class="title-col">Title</th>
-                <th class="status-col">Status</th>
+                <th class="branch-col"></th>
+                <th class="status-col">AI-Status</th>
+                <th class="ci-col"></th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
@@ -629,7 +632,9 @@ ${assignedIssueRows}
             <tr>
                 <th class="repo-col">Repo</th>
                 <th class="title-col">Title</th>
-                <th class="status-col">Status</th>
+                <th class="branch-col"></th>
+                <th class="status-col">AI-Status</th>
+                <th class="ci-col"></th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
@@ -645,7 +650,9 @@ ${mentionedIssueRows}
             <tr>
                 <th class="repo-col">Repo</th>
                 <th class="title-col">Title</th>
-                <th class="status-col">Status</th>
+                <th class="branch-col"></th>
+                <th class="status-col">AI-Status</th>
+                <th class="ci-col"></th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
@@ -697,6 +704,24 @@ ${createdIssueRows}
                 }, 1000);
             });
         }
+
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+                var sel = window.getSelection();
+                var node = sel.anchorNode || document.activeElement;
+                while (node && node !== document.body) {
+                    if (node.classList && node.classList.contains('ai-log')) {
+                        e.preventDefault();
+                        var range = document.createRange();
+                        range.selectNodeContents(node);
+                        sel.removeAllRanges();
+                        sel.addRange(range);
+                        return;
+                    }
+                    node = node.parentNode;
+                }
+            }
+        });
 
         // Connect to AI status stream
         var es = new EventSource('/api/ai-stream');
