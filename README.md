@@ -24,7 +24,7 @@ Custom port: `PORT=9999 ./enable.sh`
 
 ## Update
 ```bash
-cd github-status
+cd ~/github-status
 pm2 stop github-status
 git pull origin HEAD
 pm2 start github-status
