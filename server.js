@@ -154,17 +154,21 @@ async function fetchIssueDetails(repo, number) {
   return JSON.parse(raw);
 }
 
-async function fetchPRDetails(repo, number) {
-  const [detailsRaw, diffRaw, reviewCommentsRaw] = await Promise.all([
-    gh('pr', 'view', String(number), '--repo', repo,
-      '--json', 'reviewDecision,statusCheckRollup,comments,reviews,updatedAt,isDraft,mergeable,labels,body,headRefName'),
+async function fetchPRSummary(repo, number) {
+  const raw = await gh('pr', 'view', String(number), '--repo', repo,
+    '--json', 'reviewDecision,statusCheckRollup,comments,reviews,updatedAt,isDraft,mergeable,labels,body,headRefName');
+  return JSON.parse(raw);
+}
+
+async function fetchPRPromptData(repo, number) {
+  const [diffRaw, reviewCommentsRaw] = await Promise.all([
     gh('pr', 'diff', String(number), '--repo', repo),
     gh('api', `repos/${repo}/pulls/${number}/comments`, '--paginate'),
   ]);
-  const details = JSON.parse(detailsRaw);
-  details.diff = diffRaw.length > 20000 ? diffRaw.slice(0, 20000) + '\n... (truncated)' : diffRaw;
-  details.reviewComments = JSON.parse(reviewCommentsRaw);
-  return details;
+  return {
+    diff: diffRaw.length > 20000 ? diffRaw.slice(0, 20000) + '\n... (truncated)' : diffRaw,
+    reviewComments: JSON.parse(reviewCommentsRaw),
+  };
 }
 
 // === AI Status Generation (streaming per-PR/issue) ===
@@ -431,17 +435,13 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     const repoShort = pr.repo.split('/').pop();
     const authorSpan = includeAuthor ? ` <span class="author">@${escapeHtml(pr.author)}</span>` : '';
     const stateSpan = includeState ? stateBadge(pr.state) : '';
-    const ci = failingCiHtml(pr);
-    const branch = pr.details?.headRefName || '';
-    const checkoutCmd = branch ? `cd ~/${escapeHtml(repoShort)} && git fetch origin ${escapeHtml(branch)} && git checkout ${escapeHtml(branch)}` : '';
-    const checkoutSpan = checkoutCmd ? `<br><span class="checkout-cmd" onclick="copyCmd(this)" data-cmd="${checkoutCmd}">copy git checkout cmd</span>` : '';
     const color = repoColor(repoShort);
     return `            <tr>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
                 <td class="title-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number} ${escapeHtml(pr.title)}</a>${authorSpan}${stateSpan}</td>
-                <td class="branch-col"><span class="branch-name" onclick="copyBranch(this)" title="Click to copy">${escapeHtml(branch)}</span>${checkoutSpan}</td>
+                <td class="branch-col status-loading" id="branch-${globalIndex}">generating...</td>
                 ${statusCell(pr, globalIndex)}
-                <td class="ci-col">${ci}</td>
+                <td class="ci-col status-loading" id="ci-${globalIndex}">generating...</td>
                 <td class="days-col days-${daysClass(pr.days)}">${pr.days}d</td>
             </tr>`;
   }
@@ -713,6 +713,34 @@ ${createdIssueRows}
         var completed = 0;
         var total = ${myPRs.length + reviewPRs.length + mentionedPRs.length + assignedIssues.length + mentionedIssues.length + createdIssues.length};
 
+        es.addEventListener('pr-details', function(e) {
+            var d = JSON.parse(e.data);
+            var branchCell = document.getElementById('branch-' + d.index);
+            if (branchCell) {
+                branchCell.classList.remove('status-loading');
+                var branch = d.branch;
+                var html = '<span class="branch-name" onclick="copyBranch(this)" title="Click to copy">' + branch.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>';
+                if (branch) {
+                    var cmd = 'cd ~/' + d.repoShort + ' && git fetch origin ' + branch + ' && git checkout ' + branch;
+                    html += '<br><span class="checkout-cmd" onclick="copyCmd(this)" data-cmd="' + cmd.replace(/"/g,'&quot;') + '">copy git checkout cmd</span>';
+                }
+                branchCell.innerHTML = html;
+            }
+            var ciCell = document.getElementById('ci-' + d.index);
+            if (ciCell) {
+                ciCell.classList.remove('status-loading');
+                if (d.failing && d.failing.length) {
+                    ciCell.innerHTML = d.failing.map(function(c) {
+                        var name = (c.name || c.context || 'ci').replace(/^ci\\/circleci:\\s*/i, '').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+                        var url = c.detailsUrl || c.targetUrl || '';
+                        return url ? '<a class="ci-link" href="' + url.replace(/"/g,'&quot;') + '">' + name + '</a>' : '<span class="ci-link">' + name + '</span>';
+                    }).join('<br>');
+                } else {
+                    ciCell.textContent = '';
+                }
+            }
+        });
+
         es.addEventListener('ai-log', function(e) {
             var d = JSON.parse(e.data);
             var log = document.getElementById('ai-log-' + d.index);
@@ -816,55 +844,10 @@ async function handleStatusStream(req, res) {
       ...createdIssuesDeduped.map(i => ({ ...i, section: 'created-issue', isIssue: true })),
     ];
 
-    log(`Fetching details for ${allPRs.length} PRs and ${allIssues.length} issues in parallel...`, 'info');
+    allPRs.forEach(pr => { pr.days = daysSince(pr.updated_at); });
+    allIssues.forEach(issue => { issue.days = daysSince(issue.updated_at); });
 
-    const [detailResults, issueDetailResults] = await Promise.all([
-      Promise.allSettled(
-        allPRs.map(async (pr) => {
-          log(`  → PR ${pr.repo}#${pr.number}`, 'info');
-          return fetchPRDetails(pr.repo, pr.number);
-        })
-      ),
-      Promise.allSettled(
-        allIssues.map(async (issue) => {
-          log(`  → Issue ${issue.repo}#${issue.number}`, 'info');
-          return fetchIssueDetails(issue.repo, issue.number);
-        })
-      ),
-    ]);
-
-    detailResults.forEach((result, i) => {
-      if (result.status === 'fulfilled') {
-        allPRs[i].details = result.value;
-      } else {
-        log(`Failed: ${allPRs[i].repo}#${allPRs[i].number}: ${result.reason?.message}`, 'error');
-        allPRs[i].details = null;
-        allPRs[i].fetchError = result.reason?.message || 'Unknown error';
-      }
-      allPRs[i].days = daysSince(allPRs[i].updated_at);
-
-      // Detect if I responded in mentioned PRs
-      if (allPRs[i].section === 'mentioned' && allPRs[i].details) {
-        const d = allPRs[i].details;
-        const myComments = (d.comments || []).some(c => c.author?.login === username);
-        const myReviews = (d.reviews || []).some(r => r.author?.login === username);
-        const myReviewComments = (d.reviewComments || []).some(rc => rc.user?.login === username);
-        allPRs[i].iResponded = myComments || myReviews || myReviewComments;
-      }
-    });
-
-    issueDetailResults.forEach((result, i) => {
-      if (result.status === 'fulfilled') {
-        allIssues[i].details = result.value;
-      } else {
-        log(`Failed: ${allIssues[i].repo}#${allIssues[i].number}: ${result.reason?.message}`, 'error');
-        allIssues[i].details = null;
-        allIssues[i].fetchError = result.reason?.message || 'Unknown error';
-      }
-      allIssues[i].days = daysSince(allIssues[i].updated_at);
-    });
-
-    log('All details fetched. Rendering dashboard...', 'success');
+    log('Rendering dashboard...', 'success');
 
     // Store all items for phase 2 (AI streaming)
     const allItems = [...allPRs, ...allIssues];
@@ -937,6 +920,41 @@ function handleAIStream(req, res) {
       const pr = allPRs[index];
       if (pr.fetchError) { resolve(); return; }
       await chaosDelay();
+
+      // Lazy-load all details (deferred from Phase 1 for faster table render)
+      try {
+        if (pr.isIssue) {
+          pr.details = await fetchIssueDetails(pr.repo, pr.number);
+        } else {
+          const [summary, promptData] = await Promise.all([
+            fetchPRSummary(pr.repo, pr.number),
+            fetchPRPromptData(pr.repo, pr.number),
+          ]);
+          pr.details = { ...summary, ...promptData };
+          // Send branch and CI to client
+          const repoShort = pr.repo.split('/').pop();
+          const branch = summary.headRefName || '';
+          const failing = (summary.statusCheckRollup || []).filter(c => {
+            const s = (c.conclusion || c.state || c.status || '').toUpperCase();
+            return s === 'FAILURE' || s === 'ERROR' || s === 'TIMED_OUT';
+          });
+          send('pr-details', { index, branch, repoShort, failing });
+          // Detect if user responded in mentioned PRs
+          if (pr.section === 'mentioned') {
+            const myComments = (summary.comments || []).some(c => c.author?.login === ghUsername);
+            const myReviews = (summary.reviews || []).some(r => r.author?.login === ghUsername);
+            const myReviewComments = (promptData.reviewComments || []).some(rc => rc.user?.login === ghUsername);
+            pr.iResponded = myComments || myReviews || myReviewComments;
+          }
+        }
+      } catch (e) {
+        console.error(`Failed to fetch details for ${pr.repo}#${pr.number}: ${e.message}`);
+        if (!pr.isIssue) send('pr-details', { index, branch: '', repoShort: pr.repo.split('/').pop(), failing: [], error: e.message });
+        send('ai-error', { index, error: `Failed to fetch details: ${e.message}` });
+        resolve();
+        return;
+      }
+
       const prompt = buildPromptForItem(pr);
       const cacheKey = hashPrompt(prompt);
 
