@@ -496,11 +496,11 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .days-bad { color: #f85149; }
         .ci-col { font-size: 11px; vertical-align: top; }
         .ci-link { color: #f85149; font-size: 11px; }
-        .repo-col { font-weight: 500; width: 6%; }
+        .repo-col { font-weight: 500; width: 5%; }
         .author { color: #8b949e; font-size: 11px; }
-        .title-col { width: 22%; }
-        .status-col { font-size: 11px; width: 42%; }
-        .branch-col { font-size: 11px; width: 12%; }
+        .title-col { width: 18%; }
+        .status-col { font-size: 11px; width: 37%; }
+        .branch-col { font-size: 11px; width: 24%; }
         .branch-name { cursor: pointer; color: #8b949e; }
         .checkout-cmd { cursor: pointer; color: #484f58; font-size: 10px; position: relative; }
         .checkout-cmd:hover { color: #58a6ff; }
