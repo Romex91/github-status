@@ -566,7 +566,11 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
 </head>
 <body>
     ${updateInfo ? `<div class="update-banner" id="update-banner">
-        <span style="color:#d29922">Update available: ${updateInfo.behind} new commit${updateInfo.behind > 1 ? 's' : ''} (${updateInfo.local} \u2192 ${updateInfo.remote}). Run: <code>cd ~/github-status && pm2 stop github-status && git pull origin HEAD && pm2 start github-status</code></span>
+        <div style="flex:1">
+            <span style="color:#d29922">Update available: ${updateInfo.behind} new commit${updateInfo.behind > 1 ? 's' : ''}</span>
+            <ul style="margin:4px 0 4px 20px;padding:0;color:#8b949e">${updateInfo.commits.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ul>
+            <span>Run: <code>cd ~/github-status && pm2 stop github-status && git pull origin HEAD && pm2 start github-status</code></span>
+        </div>
         <span class="dismiss" onclick="document.getElementById('update-banner').remove()">\u2715</span>
     </div>` : ''}
     <h1>GitHub Status - ${date}</h1>
@@ -857,7 +861,7 @@ ${createdIssueRows}
             if (pendingEnqueue.length > 0 && !enqueueTimer) {
                 enqueueTimer = setTimeout(flushEnqueue, 50);
             }
-        }, { rootMargin: '200px' });
+        }, { rootMargin: '200%' });
 
         document.querySelectorAll('[id^="status-"]').forEach(function(cell) {
             var idx = parseInt(cell.id.replace('status-', ''));
@@ -876,12 +880,14 @@ ${createdIssueRows}
 
 async function checkForUpdates() {
   try {
-    await runCmd('git', ['fetch', 'origin', '--quiet']);
+    try { await runCmd('git', ['fetch', 'origin', '--quiet']); } catch {} // fetch has no stdout, runCmd rejects on empty output
     const local = (await runCmd('git', ['rev-parse', 'HEAD'])).trim();
     const remote = (await runCmd('git', ['rev-parse', 'origin/main'])).trim();
     if (local !== remote) {
       const behind = (await runCmd('git', ['rev-list', '--count', `${local}..${remote}`])).trim();
-      return { behind: parseInt(behind), local: local.slice(0, 7), remote: remote.slice(0, 7) };
+      const log = (await runCmd('git', ['log', '--oneline', `${local}..${remote}`])).trim();
+      const commits = log.split('\n').map(l => l.trim()).filter(Boolean);
+      return { behind: parseInt(behind), local: local.slice(0, 7), remote: remote.slice(0, 7), commits };
     }
   } catch (e) {
     console.error('Version check failed:', e.message);
