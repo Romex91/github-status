@@ -891,7 +891,7 @@ function handleAIStream(req, res) {
   }
 
   if (!pendingPRData) {
-    send('ai-error', { index: 0, error: 'No PR data available. Reload the page.' });
+    send('ai-error', { index: 0, error: new Error('No PR data available. Reload the page.').stack });
     res.end();
     return;
   }
@@ -963,7 +963,7 @@ function handleAIStream(req, res) {
       }
 
       if (CHAOS && Math.random() < 0.3) {
-        send('ai-error', { index, error: '[CHAOS] random Claude spawn failure' });
+        send('ai-error', { index, error: new Error('[CHAOS] random Claude spawn failure').stack });
         resolve();
         return;
       }
@@ -996,7 +996,7 @@ function handleAIStream(req, res) {
 
       child.on('close', (code) => {
         if (code !== 0 || !stdout.trim()) {
-          send('ai-error', { index, error: stderr || `Exit code ${code}` });
+          send('ai-error', { index, error: (stderr || `Exit code ${code}`) + '\n' + new Error('Claude process failed').stack });
         } else {
           try {
             const text = stdout.trim();
