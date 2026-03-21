@@ -23,6 +23,8 @@ Open http://localhost:7777
 Custom port: `PORT=9999 ./enable.sh`
 
 ## Update
+Dashboard will auto-notify if there are fresh commits in this repo
+
 ```bash
 cd ~/github-status
 pm2 stop github-status
