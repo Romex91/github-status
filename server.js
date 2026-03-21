@@ -540,6 +540,19 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
             overflow-y: auto;
         }
         .ai-log.visible { display: block; }
+
+        @media (max-width: 900px) {
+            table { table-layout: auto; }
+            thead { display: none; }
+            tr { display: flex; flex-wrap: wrap; border-bottom: 1px solid #21262d; padding: 6px 0; }
+            td { border-bottom: none; }
+            .repo-col { width: auto; }
+            .title-col { width: 100%; order: 1; }
+            .branch-col { width: 100%; order: 2; }
+            .status-col { width: 100%; order: 3; }
+            .ci-col { width: auto; order: 4; }
+            .days-col { width: auto; order: 5; margin-left: auto; }
+        }
     </style>
 </head>
 <body>
