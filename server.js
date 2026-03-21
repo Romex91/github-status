@@ -450,8 +450,8 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         h1 { font-size: 16px; margin: 0 0 12px 0; color: #c9d1d9; }
         h1.section-heading { font-size: 20px; margin: 28px 0 8px 0; color: #c9d1d9; border-bottom: 1px solid #21262d; padding-bottom: 8px; }
         h2 { font-size: 13px; margin: 16px 0 6px 0; color: #8b949e; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-        th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid #21262d; vertical-align: top; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: fixed; }
+        th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid #21262d; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }
         th { font-weight: 600; color: #8b949e; font-size: 11px; text-transform: uppercase; }
         tr:hover { background-color: #161b22; }
         a { color: #58a6ff; text-decoration: none; }
@@ -462,18 +462,18 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .days-good { color: #3fb950; }
         .days-warning { color: #d29922; }
         .days-bad { color: #f85149; }
-        .ci-col { font-size: 11px; white-space: nowrap; vertical-align: top; }
+        .ci-col { font-size: 11px; vertical-align: top; }
         .ci-link { color: #f85149; font-size: 11px; }
-        .repo-col { white-space: nowrap; font-weight: 500; }
+        .repo-col { font-weight: 500; width: 8%; }
         .author { color: #8b949e; font-size: 11px; }
-        .title-col { max-width: 400px; }
-        .status-col { max-width: 500px; font-size: 11px; }
-        .link-col { white-space: nowrap; }
-        .branch-col { white-space: nowrap; font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+        .title-col { width: 30%; }
+        .status-col { font-size: 11px; width: 30%; }
+        .branch-col { font-size: 11px; width: 12%; }
         .branch-name { cursor: pointer; color: #8b949e; }
         .branch-name:hover { color: #58a6ff; }
         .branch-name.copied { color: #3fb950; }
-        .days-col { white-space: nowrap; text-align: right; }
+        .ci-col { width: 10%; }
+        .days-col { text-align: right; width: 4%; }
         .footer { color: #484f58; font-size: 11px; margin-top: 20px; }
 
         .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
@@ -506,11 +506,11 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     <table>
         <thead>
             <tr>
-                <th>Repo</th>
-                <th>Title</th>
-                <th>Branch</th>
-                <th>Status</th>
-                <th>CI</th>
+                <th class="repo-col">Repo</th>
+                <th class="title-col">Title</th>
+                <th class="branch-col">Branch</th>
+                <th class="status-col">Status</th>
+                <th class="ci-col">CI</th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
@@ -523,11 +523,11 @@ ${myRows}
     <table>
         <thead>
             <tr>
-                <th>Repo</th>
-                <th>Title</th>
-                <th>Branch</th>
-                <th>Status</th>
-                <th>CI</th>
+                <th class="repo-col">Repo</th>
+                <th class="title-col">Title</th>
+                <th class="branch-col">Branch</th>
+                <th class="status-col">Status</th>
+                <th class="ci-col">CI</th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
@@ -540,11 +540,11 @@ ${reviewRows}
     <table>
         <thead>
             <tr>
-                <th>Repo</th>
-                <th>Title</th>
-                <th>Branch</th>
-                <th>Status</th>
-                <th>CI</th>
+                <th class="repo-col">Repo</th>
+                <th class="title-col">Title</th>
+                <th class="branch-col">Branch</th>
+                <th class="status-col">Status</th>
+                <th class="ci-col">CI</th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
@@ -559,9 +559,9 @@ ${mentionedRows}
     <table>
         <thead>
             <tr>
-                <th>Repo</th>
-                <th>Title</th>
-                <th>Status</th>
+                <th class="repo-col">Repo</th>
+                <th class="title-col">Title</th>
+                <th class="status-col">Status</th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
@@ -574,9 +574,9 @@ ${assignedIssueRows}
     <table>
         <thead>
             <tr>
-                <th>Repo</th>
-                <th>Title</th>
-                <th>Status</th>
+                <th class="repo-col">Repo</th>
+                <th class="title-col">Title</th>
+                <th class="status-col">Status</th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
@@ -589,9 +589,9 @@ ${mentionedIssueRows}
     <table>
         <thead>
             <tr>
-                <th>Repo</th>
-                <th>Title</th>
-                <th>Status</th>
+                <th class="repo-col">Repo</th>
+                <th class="title-col">Title</th>
+                <th class="status-col">Status</th>
                 <th class="days-col">Days</th>
             </tr>
         </thead>
