@@ -381,8 +381,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     const color = repoColor(repoShort);
     return `            <tr>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
-                <td class="title-col">${escapeHtml(pr.title)}${authorSpan}${stateSpan}</td>
-                <td class="link-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number}</a></td>
+                <td class="title-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number} ${escapeHtml(pr.title)}</a>${authorSpan}${stateSpan}</td>
                 <td class="branch-col"><span class="branch-name" onclick="copyBranch(this)" title="Click to copy">${escapeHtml(branch)}</span></td>
                 <td class="status-col" id="status-${globalIndex}">
                     <a href="#" class="ai-toggle" data-index="${globalIndex}" onclick="toggleLog(${globalIndex});return false">generating...</a>
@@ -398,8 +397,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     const color = repoColor(repoShort);
     return `            <tr>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
-                <td class="title-col">${escapeHtml(issue.title)}</td>
-                <td class="link-col"><a href="${escapeHtml(issue.html_url)}">#${issue.number}</a></td>
+                <td class="title-col"><a href="${escapeHtml(issue.html_url)}">#${issue.number} ${escapeHtml(issue.title)}</a></td>
                 <td class="status-col" id="status-${globalIndex}">
                     <a href="#" class="ai-toggle" data-index="${globalIndex}" onclick="toggleLog(${globalIndex});return false">generating...</a>
                     <div class="ai-log" id="ai-log-${globalIndex}"></div>
@@ -494,7 +492,6 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
             <tr>
                 <th>Repo</th>
                 <th>Title</th>
-                <th class="link-col">Link</th>
                 <th>Branch</th>
                 <th>Status</th>
                 <th>CI</th>
@@ -512,7 +509,6 @@ ${myRows}
             <tr>
                 <th>Repo</th>
                 <th>Title</th>
-                <th class="link-col">Link</th>
                 <th>Branch</th>
                 <th>Status</th>
                 <th>CI</th>
@@ -530,7 +526,6 @@ ${reviewRows}
             <tr>
                 <th>Repo</th>
                 <th>Title</th>
-                <th class="link-col">Link</th>
                 <th>Branch</th>
                 <th>Status</th>
                 <th>CI</th>
@@ -550,7 +545,6 @@ ${mentionedRows}
             <tr>
                 <th>Repo</th>
                 <th>Title</th>
-                <th class="link-col">Link</th>
                 <th>Status</th>
                 <th class="days-col">Days</th>
             </tr>
@@ -566,7 +560,6 @@ ${assignedIssueRows}
             <tr>
                 <th>Repo</th>
                 <th>Title</th>
-                <th class="link-col">Link</th>
                 <th>Status</th>
                 <th class="days-col">Days</th>
             </tr>
@@ -582,7 +575,6 @@ ${mentionedIssueRows}
             <tr>
                 <th>Repo</th>
                 <th>Title</th>
-                <th class="link-col">Link</th>
                 <th>Status</th>
                 <th class="days-col">Days</th>
             </tr>
