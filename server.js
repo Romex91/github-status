@@ -144,7 +144,7 @@ async function fetchIssueDetails(repo, number) {
 async function fetchPRDetails(repo, number) {
   const [detailsRaw, diffRaw, reviewCommentsRaw] = await Promise.all([
     gh('pr', 'view', String(number), '--repo', repo,
-      '--json', 'reviewDecision,statusCheckRollup,comments,reviews,updatedAt,isDraft,mergeable,labels,body'),
+      '--json', 'reviewDecision,statusCheckRollup,comments,reviews,updatedAt,isDraft,mergeable,labels,body,headRefName'),
     gh('pr', 'diff', String(number), '--repo', repo).catch(() => '(diff unavailable)'),
     gh('api', `repos/${repo}/pulls/${number}/comments`, '--paginate').catch(() => '[]'),
   ]);
@@ -344,9 +344,11 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     const authorSpan = includeAuthor ? ` <span class="author">@${escapeHtml(pr.author)}</span>` : '';
     const stateSpan = includeState ? stateBadge(pr.state) : '';
     const ci = failingCiHtml(pr);
+    const branch = pr.details?.headRefName || '';
     return `            <tr>
                 <td class="title-col"><span class="repo-badge">${escapeHtml(repoShort)}</span>${escapeHtml(pr.title)}${authorSpan}${stateSpan}</td>
                 <td class="link-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number}</a></td>
+                <td class="branch-col"><span class="branch-name" onclick="copyBranch(this)" title="Click to copy">${escapeHtml(branch)}</span></td>
                 <td class="status-col" id="status-${globalIndex}">
                     <a href="#" class="ai-toggle" data-index="${globalIndex}" onclick="toggleLog(${globalIndex});return false">generating...</a>
                     <div class="ai-log" id="ai-log-${globalIndex}"></div>
@@ -416,6 +418,10 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .title-col { max-width: 400px; }
         .status-col { max-width: 500px; font-size: 11px; }
         .link-col { white-space: nowrap; }
+        .branch-col { white-space: nowrap; font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+        .branch-name { cursor: pointer; color: #8b949e; }
+        .branch-name:hover { color: #58a6ff; }
+        .branch-name.copied { color: #3fb950; }
         .days-col { white-space: nowrap; text-align: right; }
         .footer { color: #484f58; font-size: 11px; margin-top: 20px; }
 
@@ -451,6 +457,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
             <tr>
                 <th>Title</th>
                 <th class="link-col">Link</th>
+                <th>Branch</th>
                 <th>Status</th>
                 <th>CI</th>
                 <th class="days-col">Days</th>
@@ -467,6 +474,7 @@ ${myRows}
             <tr>
                 <th>Title</th>
                 <th class="link-col">Link</th>
+                <th>Branch</th>
                 <th>Status</th>
                 <th>CI</th>
                 <th class="days-col">Days</th>
@@ -483,6 +491,7 @@ ${reviewRows}
             <tr>
                 <th>Title</th>
                 <th class="link-col">Link</th>
+                <th>Branch</th>
                 <th>Status</th>
                 <th>CI</th>
                 <th class="days-col">Days</th>
@@ -546,6 +555,20 @@ ${createdIssueRows}
         function toggleLog(index) {
             var el = document.getElementById('ai-log-' + index);
             el.classList.toggle('visible');
+        }
+
+        function copyBranch(el) {
+            var text = el.textContent;
+            if (!text) return;
+            navigator.clipboard.writeText(text).then(function() {
+                el.classList.add('copied');
+                var orig = el.textContent;
+                el.textContent = 'copied!';
+                setTimeout(function() {
+                    el.textContent = orig;
+                    el.classList.remove('copied');
+                }, 1000);
+            });
         }
 
         // Connect to AI status stream
