@@ -15,8 +15,9 @@ import { homedir, platform } from 'node:os';
  * @param {string} opts.title - PR/issue title
  * @param {boolean} [opts.isIssue] - Whether this is an issue (vs PR)
  * @param {string} [opts.branch] - PR head branch name
+ * @param {string} [opts.aiStatus] - AI-generated status summary
  */
-export function launchChat({ prompt, url, repo, number, title, isIssue, branch }) {
+export function launchChat({ prompt, url, repo, number, title, isIssue, branch, aiStatus }) {
   const itemType = isIssue ? 'issue' : 'PR';
   const repoShort = repo.split('/').pop();
   const tmpBase = platform() === 'win32' ? process.env.TEMP || 'C:\\Temp' : '/tmp';
@@ -35,6 +36,7 @@ export function launchChat({ prompt, url, repo, number, title, isIssue, branch }
 - Type: ${itemType}
 ${localRepo.exists ? `- Local clone: ${localRepo.path}` : ''}
 ${branch ? `- Branch: ${branch}` : ''}
+${aiStatus ? `- AI Status: ${aiStatus}` : ''}
 
 ## Instructions
 

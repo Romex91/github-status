@@ -208,6 +208,11 @@ function buildPromptForItem(item) {
   return buildPromptForPR(item);
 }
 
+function buildContextForItem(item) {
+  if (item.isIssue) return buildContextForIssue(item);
+  return buildContextForPR(item);
+}
+
 function buildTimeline(d) {
   const entries = [];
   const botLogins = new Set(['coderabbitai', 'shortcut-integration', 'popmenu-bot', 'cursor']);
@@ -263,7 +268,7 @@ function buildTimeline(d) {
     });
 }
 
-function buildPromptForPR(pr) {
+function buildContextForPR(pr) {
   const d = pr.details || {};
 
   const timeline = buildTimeline(d);
@@ -279,7 +284,7 @@ function buildPromptForPR(pr) {
   const pendingReviewers = (d.reviewRequests || []).map(r => r.login || r.name || r.slug || 'unknown');
   const latestReviews = (d.latestReviews || []).map(r => `${r.author?.login || 'unknown'}: ${r.state}`);
 
-  const sections = [
+  return [
     `Title: ${pr.title}`,
     `Repo: ${pr.repo}`,
     `Type: ${typeMap[pr.section] || 'Unknown'}`,
@@ -295,7 +300,11 @@ function buildPromptForPR(pr) {
     `\n# Timeline (all comments/reviews, chronological):\n${timeline.length ? timeline.join('\n') : '  (none)'}`,
     `\nPR Body:\n${(d.body || '(empty)').slice(0, 1000)}`,
     `\nDiff:\n${d.diff || '(unavailable)'}`,
-  ].filter(Boolean);
+  ].filter(Boolean).join('\n');
+}
+
+function buildPromptForPR(pr) {
+  const context = buildContextForPR(pr);
 
   const commonRules = `
 - My GitHub username is: ${ghUsername}
@@ -320,14 +329,14 @@ function buildPromptForPR(pr) {
 
   return `You are a JSON API. Analyze this GitHub PR and return ONLY a single JSON object (no markdown fences, no explanation).
 
-${sections.join('\n')}
+${context}
 
 Return: {"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>","ciUrl":"<failing CI URL or null>"}
 
 Rules:${rules}`;
 }
 
-function buildPromptForIssue(issue) {
+function buildContextForIssue(issue) {
   const d = issue.details || {};
 
   const comments = (d.comments || [])
@@ -338,7 +347,7 @@ function buildPromptForIssue(issue) {
 
   const typeMap = { 'assigned-issue': 'Assigned to me', 'mentioned-issue': 'Mentioned in this issue', 'created-issue': 'Created by me' };
 
-  const sections = [
+  return [
     `Title: ${issue.title}`,
     `Repo: ${issue.repo}`,
     `Type: ${typeMap[issue.section] || 'Unknown'}`,
@@ -347,13 +356,17 @@ function buildPromptForIssue(issue) {
     `Days since last update: ${issue.days}`,
     `\nComments (excluding bots):\n${comments.length ? comments.join('\n') : '  (none)'}`,
     `\nIssue Body:\n${(d.body || '(empty)').slice(0, 1000)}`,
-  ].filter(Boolean);
+  ].filter(Boolean).join('\n');
+}
+
+function buildPromptForIssue(issue) {
+  const context = buildContextForIssue(issue);
 
   return `You are a JSON API. Analyze this GitHub issue and return ONLY a single JSON object (no markdown fences, no explanation).
 
 My GitHub username is: ${ghUsername}
 
-${sections.join('\n')}
+${context}
 
 Return: {"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>"}
 
@@ -1108,6 +1121,7 @@ function handleAIStream(req, res) {
 
     let prompt = buildPromptForItem(pr);
     pr.builtPrompt = prompt;
+    pr.chatContext = buildContextForItem(pr);
     if (CHAOS && Math.random() < 0.1) {
       prompt = 'Respond with only: CHAOS REIGNS';
     }
@@ -1118,6 +1132,7 @@ function handleAIStream(req, res) {
     if (cached) {
       sendIfActive(index, 'ai-log', { index, text: `[AI response was cached to save tokens — ${cached.timestamp}]\n\n=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n` });
       const { statusText, statusClass } = applyOverrides(pr, cached.statusText, cached.statusClass);
+      pr.aiStatus = statusText;
       sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null });
       return;
     }
@@ -1139,6 +1154,7 @@ function handleAIStream(req, res) {
       timestamp: new Date().toISOString(),
     });
     const { statusText, statusClass } = applyOverrides(pr, rawStatusText, rawStatusClass);
+    pr.aiStatus = statusText;
     sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl });
   }
 
@@ -1312,16 +1328,17 @@ const server = http.createServer((req, res) => {
         const { index } = JSON.parse(body);
         const pr = pendingPRData && pendingPRData[index];
         if (!pr) { res.writeHead(404); res.end(JSON.stringify({ error: 'Item not found. Reload the page.' })); return; }
-        if (!pr.builtPrompt) { res.writeHead(400); res.end(JSON.stringify({ error: 'AI analysis not yet complete for this item.' })); return; }
+        if (!pr.chatContext) { res.writeHead(400); res.end(JSON.stringify({ error: 'AI analysis not yet complete for this item.' })); return; }
 
         launchChat({
-          prompt: pr.builtPrompt,
+          prompt: pr.chatContext,
           url: pr.html_url,
           repo: pr.repo,
           number: pr.number,
           title: pr.title,
           isIssue: pr.isIssue,
           branch: pr.details?.headRefName || '',
+          aiStatus: pr.aiStatus || '',
         });
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
