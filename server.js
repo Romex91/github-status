@@ -480,15 +480,16 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
             background-color: #0d1117;
             color: #c9d1d9;
         }
-        h1 { font-size: 18px; margin: 0 0 16px 0; color: #58a6ff; }
-        h1.section-heading { font-size: 24px; margin: 36px 0 12px 0; color: #58a6ff; border-bottom: 2px solid #58a6ff; padding-bottom: 10px; text-transform: uppercase; }
-        h2 { font-size: 15px; margin: 24px 0 8px 0; color: #58a6ff; border-top: 1px solid #58a6ff; padding-top: 12px; cursor: pointer; user-select: none; }
+        h1 { font-size: 22px; margin: 0 0 16px 0; color: #58a6ff; }
+        h1.section-heading { font-size: 28px; margin: 36px 0 12px 0; color: #58a6ff; border-bottom: 2px solid #58a6ff; padding-bottom: 10px; text-transform: uppercase; }
+        h2 { font-size: 18px; margin: 24px 0 8px 0; color: #58a6ff; cursor: pointer; user-select: none; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 0; table-layout: fixed; }
+        hr.subdivider { border: none; border-top: 1px solid #58a6ff; margin: 4px 0 20px 0; }
         h2::before { content: '▼ '; font-size: 11px; }
         h2.folded::before { content: '▶ '; font-size: 11px; }
         h2.folded + table { display: none; }
         .fold-controls { margin: 8px 0; font-size: 11px; }
         .fold-controls a { color: #58a6ff; cursor: pointer; margin-right: 12px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: fixed; }
         th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid #21262d; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }
         th { font-weight: 600; color: #8b949e; font-size: 11px; text-transform: uppercase; }
         tr:hover { background-color: #161b22; }
@@ -557,6 +558,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
 ${myRows}
         </tbody>
     </table>
+    <hr class="subdivider">
 
     <h2 onclick="this.classList.toggle('folded')">PRs Waiting for My Review (${reviewPRs.length})</h2>
     <table>
@@ -574,6 +576,7 @@ ${myRows}
 ${reviewRows}
         </tbody>
     </table>
+    <hr class="subdivider">
 
     <h2 onclick="this.classList.toggle('folded')">PRs I Was Mentioned In (${mentionedPRs.length})</h2>
     <table>
@@ -591,6 +594,7 @@ ${reviewRows}
 ${mentionedRows}
         </tbody>
     </table>
+    <hr class="subdivider">
 
     <h1 class="section-heading">Issues</h1>
 
@@ -608,6 +612,7 @@ ${mentionedRows}
 ${assignedIssueRows}
         </tbody>
     </table>
+    <hr class="subdivider">
 
     <h2 onclick="this.classList.toggle('folded')">Issues I Was Mentioned In (${mentionedIssues.length})</h2>
     <table>
@@ -623,6 +628,7 @@ ${assignedIssueRows}
 ${mentionedIssueRows}
         </tbody>
     </table>
+    <hr class="subdivider">
 
     <h2 onclick="this.classList.toggle('folded')">Issues I Created (${createdIssues.length})</h2>
     <table>
@@ -638,6 +644,7 @@ ${mentionedIssueRows}
 ${createdIssueRows}
         </tbody>
     </table>
+    <hr class="subdivider">
 
     <p class="footer">Generated ${date}</p>
 
