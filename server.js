@@ -993,6 +993,7 @@ const INDEX_HTML = `<!DOCTYPE html>
             document.open();
             document.write(data.html);
             document.close();
+            window.scrollTo(0, 0);
         });
 
         es.addEventListener('fatal', function(e) {
