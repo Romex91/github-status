@@ -292,7 +292,8 @@ function buildPromptForPR(pr) {
 
   const commonRules = `
 - My GitHub username is: ${ghUsername}
-- statusText should contain the most important details about the PR: ongoing discussions, unfixed issues, pending tasks, or if it's time to ping reviewers. Pick details that are most important for me.`;
+- statusText should contain the most important details about the PR: ongoing discussions, unfixed issues, pending tasks, or if it's time to ping reviewers. Pick details that are most important for me.
+- ALWAYS prefix usernames with @ in statusText (e.g. @alice, @bob). Never write bare usernames.`;
 
   const mentionedRules = `${commonRules}
 - For mentioned PRs: assess whether MY response or action is still needed
