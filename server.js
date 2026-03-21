@@ -31,8 +31,8 @@ function todayStr() {
   return d.toISOString().slice(0, 16).replace('T', ' ');
 }
 
-// Emperor protects :pray:
-const CHAOS = false;
+// SKULLS TO THE SKULL GOD
+const CHAOS = true;
 
 function chaosDelay() {
   if (!CHAOS) return Promise.resolve();
@@ -346,7 +346,7 @@ const REPO_COLORS = [
 const REPO_COLORS_PATH = new URL('./data/repo-colors.json', import.meta.url).pathname;
 
 function loadRepoColors() {
-  try { return JSON.parse(readFileSync(REPO_COLORS_PATH, 'utf8')); } catch (e) { console.error(`Failed to load repo colors: ${e.message}`); return {}; }
+  try { return JSON.parse(readFileSync(REPO_COLORS_PATH, 'utf8')); } catch (e) { console.error('Failed to load repo colors:', e); return {}; }
 }
 
 function saveRepoColors(map) {
@@ -374,7 +374,7 @@ mkdirSync(AI_CACHE_DIR, { recursive: true });
 
 function readCacheEntry(key) {
   if (CHAOS && Math.random() < 0.2) { console.error(`[CHAOS] cache read failure for ${key}`); return null; }
-  try { return JSON.parse(readFileSync(`${AI_CACHE_DIR}${key}.json`, 'utf8')); } catch (e) { console.error(`Failed to read cache entry ${key}: ${e.message}`); return null; }
+  try { return JSON.parse(readFileSync(`${AI_CACHE_DIR}${key}.json`, 'utf8')); } catch (e) { console.error(`Failed to read cache entry ${key}:`, e); return null; }
 }
 
 function writeCacheEntry(key, entry) {
@@ -397,7 +397,7 @@ function cleanAiCache(maxAgeDays = 3) {
         unlinkSync(`${AI_CACHE_DIR}${file}`);
         removed++;
       }
-    } catch (e) { console.error(`Failed to process cache file ${file}: ${e.message}`); }
+    } catch (e) { console.error(`Failed to process cache file ${file}:`, e); }
   }
   if (removed > 0) console.log(`Cleaned ${removed} stale cache entries`);
 }
@@ -514,6 +514,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .footer { color: #484f58; font-size: 11px; margin-top: 20px; }
 
         .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
+        .status-text { white-space: pre-wrap; }
         .status-text.loading { color: #d29922; }
         .copy-prompt { cursor: pointer; color: #484f58; font-size: 10px; position: relative; }
         .copy-prompt:hover { color: #58a6ff; }
@@ -760,10 +761,12 @@ ${createdIssueRows}
             var cell = document.getElementById('status-' + d.index);
             var logDiv = document.getElementById('ai-log-' + d.index);
             logDiv.textContent += '\\nERROR: ' + d.error;
+            var tooltip = document.getElementById('prompt-tooltip-' + d.index);
+            if (tooltip) tooltip.textContent = logDiv.textContent;
             var statusSpan = cell.querySelector('.status-text');
             statusSpan.className = 'status-text';
-            statusSpan.textContent = 'Failed to generate status';
-            cell.className = 'status-col status-warning';
+            statusSpan.textContent = 'ERROR: ' + d.error;
+            cell.className = 'status-col status-bad';
             completed++;
             if (completed >= total) es.close();
         });
@@ -861,9 +864,10 @@ async function handleStatusStream(req, res) {
       res.end();
     }
   } catch (err) {
-    log(`Error: ${err.message}`, 'error');
+    console.error('Fatal status stream error:', err);
+    log(`Error: ${err.stack || err.message}`, 'error');
     if (!closed) {
-      res.write(`event: fatal\ndata: ${JSON.stringify({ error: err.message })}\n\n`);
+      res.write(`event: fatal\ndata: ${JSON.stringify({ error: err.stack || err.message })}\n\n`);
       res.end();
     }
   }
@@ -938,9 +942,9 @@ function handleAIStream(req, res) {
           }
         }
       } catch (e) {
-        console.error(`Failed to fetch details for ${pr.repo}#${pr.number}: ${e.message}`);
+        console.error(`Failed to fetch details for ${pr.repo}#${pr.number}:`, e);
         if (!pr.isIssue) send('pr-details', { index, branch: '', repoShort: pr.repo.split('/').pop(), failing: [], error: e.message });
-        send('ai-error', { index, error: `Failed to fetch details: ${e.message}` });
+        send('ai-error', { index, error: `Failed to fetch details: ${e.stack || e.message}` });
         resolve();
         return;
       }
@@ -1011,14 +1015,16 @@ function handleAIStream(req, res) {
             const { statusText, statusClass } = applyOverrides(pr, rawStatusText, rawStatusClass);
             send('ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl });
           } catch (e) {
-            send('ai-error', { index, error: `Parse error: ${e.message}\nRaw: ${stdout}` });
+            console.error(`Parse error for ${pr.repo}#${pr.number}:`, e);
+            send('ai-error', { index, error: `Parse error: ${e.stack || e.message}\nRaw: ${stdout}` });
           }
         }
         resolve();
       });
 
       child.on('error', (err) => {
-        send('ai-error', { index, error: err.message });
+        console.error(`Spawn error for ${pr.repo}#${pr.number}:`, err);
+        send('ai-error', { index, error: err.stack || err.message });
         resolve();
       });
     });
