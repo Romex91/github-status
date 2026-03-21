@@ -1317,6 +1317,7 @@ const server = http.createServer((req, res) => {
           number: pr.number,
           title: pr.title,
           isIssue: pr.isIssue,
+          branch: pr.details?.headRefName || '',
         });
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
