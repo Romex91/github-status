@@ -26,10 +26,7 @@ Custom port: `PORT=9999 ./enable.sh`
 Dashboard will auto-notify if there are fresh commits in this repo
 
 ```bash
-cd ~/github-status
-pm2 stop github-status
-git pull origin HEAD
-pm2 start github-status
+cd ~/github-status && ./update.sh
 ```
 
 

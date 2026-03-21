@@ -492,7 +492,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         <p style="color:#8b949e;margin:8px 0">${updateInfo.behind} new commit${updateInfo.behind > 1 ? 's' : ''}:</p>
         <ul style="margin:4px 0 12px 20px;padding:0;color:#8b949e">${commitItems}</ul>
         <span style="color:#c9d1d9">Run:</span>
-        <code>cd ~/github-status && pm2 stop github-status && git pull origin HEAD && pm2 start github-status</code>
+        <code>cd ~/github-status && ./update.sh</code>
     </div>`;
   }
 
@@ -840,6 +840,22 @@ ${createdIssueRows}
             statusSpan.className = 'status-text';
             statusSpan.textContent = 'ERROR: ' + d.error;
             cell.className = 'status-col status-bad';
+            var copyBtn = cell.querySelector('.copy-prompt');
+            if (copyBtn) {
+                copyBtn.childNodes[0].textContent = 'copy error';
+                copyBtn.onclick = function() {
+                    navigator.clipboard.writeText(d.error).then(function() { showCopyToast(copyBtn); });
+                };
+                var fileIssue = document.createElement('span');
+                fileIssue.className = 'copy-prompt';
+                fileIssue.textContent = 'file issue';
+                fileIssue.style.marginLeft = '8px';
+                fileIssue.onclick = function() {
+                    var url = 'https://github.com/Romex91/github-status/issues/new?title=' + encodeURIComponent('Error: ' + d.error.split('\\n')[0]) + '&body=' + encodeURIComponent(d.error);
+                    window.open(url, '_blank');
+                };
+                copyBtn.parentNode.insertBefore(fileIssue, copyBtn.nextSibling);
+            }
         });
 
         es.onerror = function() {
