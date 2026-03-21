@@ -29,8 +29,8 @@ function todayStr() {
   return d.toISOString().slice(0, 16).replace('T', ' ');
 }
 
-// SKULLS TO THE SKULL GOD
-const CHAOS = true;
+// Emperor protects! :pray:
+const CHAOS = false;
 
 const CMD_TIMEOUT = 60000;
 
@@ -1040,10 +1040,20 @@ function handleAIStream(req, res) {
   async function runOne(index) {
     const pr = allPRs[index];
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), RUN_ONE_TIMEOUT);
+    let timer;
+    const inner = runOneInner(index, ac.signal);
     try {
-      await runOneInner(index, ac.signal);
+      await Promise.race([
+        inner,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            ac.abort();
+            reject(new Error(`Timeout after ${RUN_ONE_TIMEOUT / 1000}s while ${itemPhase[index] || 'unknown phase'}`));
+          }, RUN_ONE_TIMEOUT);
+        }),
+      ]);
     } catch (e) {
+      inner.catch(() => {}); // swallow late rejection from orphaned inner promise
       aborted.add(index); // prevent zombie runOneInner from sending events
       const phase = itemPhase[index] || 'unknown phase';
       if (e.name === 'AbortError' || ac.signal.aborted) e = new Error(`Timeout after ${RUN_ONE_TIMEOUT / 1000}s while ${phase}`);
