@@ -1,21 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Preflight: verify gh CLI is authenticated
+# Preflight: verify gh CLI version >= 2.83
 echo "Checking gh CLI..."
+gh_ver=$(gh --version | grep -oP '\d+\.\d+' | head -1)
+gh_major=${gh_ver%%.*}
+gh_minor=${gh_ver#*.}
+if (( gh_major < 2 || (gh_major == 2 && gh_minor < 83) )); then
+  echo "ERROR: gh CLI version $gh_ver is too old. Version >= 2.83 is required." >&2
+  exit 1
+fi
+
+# Verify gh CLI is authenticated
 if ! gh auth status &>/dev/null; then
   echo "ERROR: 'gh auth status' failed. Run 'gh auth login' first." >&2
   exit 1
 fi
-echo "gh CLI OK"
+echo "gh CLI OK (v$gh_ver)"
 
 # Preflight: verify claude CLI works (catches wrong node version, missing auth, etc.)
 echo "Checking claude CLI..."
+claude_ver=$(claude --version 2>/dev/null || echo "unknown")
 if ! claude -p "say hello" &>/dev/null; then
-  echo "ERROR: 'claude -p \"say hello\"' failed. Fix claude CLI before installing the service." >&2
+  echo "ERROR: claude v$claude_ver — 'claude -p \"say hello\"' failed. Fix claude CLI before installing the service." >&2
   exit 1
 fi
-echo "claude CLI OK"
+echo "claude CLI OK (v$claude_ver)"
 
 # Install pm2 globally if missing
 if ! command -v pm2 &>/dev/null; then

@@ -69,6 +69,12 @@ async function gh(...args) {
   return runCmd('gh', args, { signal });
 }
 
+// Capture tool versions at startup for error diagnostics
+let ghVersion = 'unknown';
+let claudeVersion = 'unknown';
+runCmd('gh', ['--version']).then(v => { ghVersion = v.match(/\d+\.\d+\.\d+/)?.[0] || v.trim(); }).catch(() => {});
+runCmd('claude', ['--version']).then(v => { claudeVersion = v.trim(); }).catch(() => {});
+
 // Store PR data between phases
 let pendingPRData = null;
 let ghUsername = null;
@@ -990,9 +996,10 @@ async function handleStatusStream(req, res) {
     }
   } catch (err) {
     console.error('Fatal status stream error:', err);
-    log(`Error: ${err.stack || err.message}`, 'error');
+    const errDetail = `${err.stack || err.message}\n\n[gh ${ghVersion}]`;
+    log(`Error: ${errDetail}`, 'error');
     if (!closed) {
-      res.write(`event: fatal\ndata: ${JSON.stringify({ error: err.stack || err.message })}\n\n`);
+      res.write(`event: fatal\ndata: ${JSON.stringify({ error: errDetail })}\n\n`);
       res.end();
     }
   }
@@ -1139,7 +1146,8 @@ function handleAIStream(req, res) {
       if (e.name === 'AbortError' || ac.signal.aborted) e = new Error(`Timeout after ${RUN_ONE_TIMEOUT / 1000}s while ${phase}`);
       console.error(`[${index}] ${pr.repo}#${pr.number} failed:`, e);
       if (!pr.isIssue) send('pr-details', { index, branch: '', repoShort: pr.repo.split('/').pop(), failing: [], error: e.message });
-      send('ai-error', { index, error: e.message.startsWith('Timeout') ? e.message : (e.stack || e.message) });
+      const errMsg = e.message.startsWith('Timeout') ? e.message : (e.stack || e.message);
+      send('ai-error', { index, error: `${errMsg}\n\n[gh ${ghVersion}, claude ${claudeVersion}]` });
     } finally {
       clearTimeout(timer);
     }
