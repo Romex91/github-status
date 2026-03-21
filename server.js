@@ -480,9 +480,14 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
             background-color: #0d1117;
             color: #c9d1d9;
         }
-        h1 { font-size: 16px; margin: 0 0 12px 0; color: #c9d1d9; }
-        h1.section-heading { font-size: 20px; margin: 28px 0 8px 0; color: #c9d1d9; border-bottom: 1px solid #21262d; padding-bottom: 8px; }
-        h2 { font-size: 13px; margin: 16px 0 6px 0; color: #8b949e; }
+        h1 { font-size: 18px; margin: 0 0 16px 0; color: #58a6ff; }
+        h1.section-heading { font-size: 24px; margin: 36px 0 12px 0; color: #58a6ff; border-bottom: 2px solid #58a6ff; padding-bottom: 10px; text-transform: uppercase; }
+        h2 { font-size: 15px; margin: 24px 0 8px 0; color: #58a6ff; border-top: 1px solid #58a6ff; padding-top: 12px; cursor: pointer; user-select: none; }
+        h2::before { content: '▼ '; font-size: 11px; }
+        h2.folded::before { content: '▶ '; font-size: 11px; }
+        h2.folded + table { display: none; }
+        .fold-controls { margin: 8px 0; font-size: 11px; }
+        .fold-controls a { color: #58a6ff; cursor: pointer; margin-right: 12px; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: fixed; }
         th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid #21262d; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }
         th { font-weight: 600; color: #8b949e; font-size: 11px; text-transform: uppercase; }
@@ -532,10 +537,11 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
 </head>
 <body>
     <h1>GitHub Status - ${date}</h1>
+    <div class="fold-controls"><a onclick="foldAll()">Fold all</a><a onclick="unfoldAll()">Unfold all</a></div>
 
     <h1 class="section-heading">Pull Requests</h1>
 
-    <h2>My Open PRs (${myPRs.length})</h2>
+    <h2 onclick="this.classList.toggle('folded')">My Open PRs (${myPRs.length})</h2>
     <table>
         <thead>
             <tr>
@@ -552,7 +558,7 @@ ${myRows}
         </tbody>
     </table>
 
-    <h2>PRs Waiting for My Review (${reviewPRs.length})</h2>
+    <h2 onclick="this.classList.toggle('folded')">PRs Waiting for My Review (${reviewPRs.length})</h2>
     <table>
         <thead>
             <tr>
@@ -569,7 +575,7 @@ ${reviewRows}
         </tbody>
     </table>
 
-    <h2>PRs I Was Mentioned In (${mentionedPRs.length})</h2>
+    <h2 onclick="this.classList.toggle('folded')">PRs I Was Mentioned In (${mentionedPRs.length})</h2>
     <table>
         <thead>
             <tr>
@@ -588,7 +594,7 @@ ${mentionedRows}
 
     <h1 class="section-heading">Issues</h1>
 
-    <h2>Issues Assigned to Me (${assignedIssues.length})</h2>
+    <h2 onclick="this.classList.toggle('folded')">Issues Assigned to Me (${assignedIssues.length})</h2>
     <table>
         <thead>
             <tr>
@@ -603,7 +609,7 @@ ${assignedIssueRows}
         </tbody>
     </table>
 
-    <h2>Issues I Was Mentioned In (${mentionedIssues.length})</h2>
+    <h2 onclick="this.classList.toggle('folded')">Issues I Was Mentioned In (${mentionedIssues.length})</h2>
     <table>
         <thead>
             <tr>
@@ -618,7 +624,7 @@ ${mentionedIssueRows}
         </tbody>
     </table>
 
-    <h2>Issues I Created (${createdIssues.length})</h2>
+    <h2 onclick="this.classList.toggle('folded')">Issues I Created (${createdIssues.length})</h2>
     <table>
         <thead>
             <tr>
@@ -636,6 +642,13 @@ ${createdIssueRows}
     <p class="footer">Generated ${date}</p>
 
     <script>
+        function foldAll() {
+            document.querySelectorAll('h2').forEach(function(h) { h.classList.add('folded'); });
+        }
+        function unfoldAll() {
+            document.querySelectorAll('h2').forEach(function(h) { h.classList.remove('folded'); });
+        }
+
         function toggleLog(index) {
             var el = document.getElementById('ai-log-' + index);
             el.classList.toggle('visible');
