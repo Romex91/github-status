@@ -41,10 +41,15 @@ function chaosDelay() {
 }
 
 async function gh(...args) {
-  await chaosDelay();
-  if (CHAOS && Math.random() < 0.05) throw new Error(`[CHAOS] gh ${args[0]} ${args[1] || ''} — random failure`);
-  const { stdout } = await execAsync('gh', args, { maxBuffer: 10 * 1024 * 1024 });
-  return stdout;
+  const cmd = `gh ${args.join(' ')}`;
+  try {
+    await chaosDelay();
+    if (CHAOS && Math.random() < 0.05) throw new Error('[CHAOS] random failure');
+    const { stdout } = await execAsync('gh', args, { maxBuffer: 10 * 1024 * 1024 });
+    return stdout;
+  } catch (e) {
+    throw new Error(`Command failed: ${cmd}\n${e.message}`);
+  }
 }
 
 // Store PR data between phases
@@ -909,125 +914,113 @@ function handleAIStream(req, res) {
     return { statusText, statusClass };
   }
 
-  function runOne(index) {
-    return new Promise(async (resolve) => {
-      const pr = allPRs[index];
-      if (pr.fetchError) { resolve(); return; }
-      await chaosDelay();
+  const RUN_ONE_TIMEOUT = CHAOS ? 3000 : 10000;
 
-      // Lazy-load all details (deferred from Phase 1 for faster table render)
-      try {
-        if (pr.isIssue) {
-          pr.details = await fetchIssueDetails(pr.repo, pr.number);
-        } else {
-          const [summary, promptData] = await Promise.all([
-            fetchPRSummary(pr.repo, pr.number),
-            fetchPRPromptData(pr.repo, pr.number),
-          ]);
-          pr.details = { ...summary, ...promptData };
-          // Send branch and CI to client
-          const repoShort = pr.repo.split('/').pop();
-          const branch = summary.headRefName || '';
-          const failing = (summary.statusCheckRollup || []).filter(c => {
-            const s = (c.conclusion || c.state || c.status || '').toUpperCase();
-            return s === 'FAILURE' || s === 'ERROR' || s === 'TIMED_OUT';
-          });
-          send('pr-details', { index, branch, repoShort, failing });
-          // Detect if user responded in mentioned PRs
-          if (pr.section === 'mentioned') {
-            const myComments = (summary.comments || []).some(c => c.author?.login === ghUsername);
-            const myReviews = (summary.reviews || []).some(r => r.author?.login === ghUsername);
-            const myReviewComments = (promptData.reviewComments || []).some(rc => rc.user?.login === ghUsername);
-            pr.iResponded = myComments || myReviews || myReviewComments;
-          }
-        }
-      } catch (e) {
-        console.error(`Failed to fetch details for ${pr.repo}#${pr.number}:`, e);
-        if (!pr.isIssue) send('pr-details', { index, branch: '', repoShort: pr.repo.split('/').pop(), failing: [], error: e.message });
-        send('ai-error', { index, error: `Failed to fetch details: ${e.stack || e.message}` });
-        resolve();
-        return;
-      }
-
-      const prompt = buildPromptForItem(pr);
-      const cacheKey = hashPrompt(prompt);
-
-      // Check cache
-      const cached = readCacheEntry(cacheKey);
-      if (cached) {
-        send('ai-log', { index, text: `[AI response was cached to save tokens — ${cached.timestamp}]\n\n=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n` });
-        const { statusText, statusClass } = applyOverrides(pr, cached.statusText, cached.statusClass);
-        send('ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null });
-        resolve();
-        return;
-      }
-
-      if (CHAOS && Math.random() < 0.3) {
-        send('ai-error', { index, error: new Error('[CHAOS] random Claude spawn failure').stack });
-        resolve();
-        return;
-      }
-
-      send('ai-log', { index, text: `=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n\n=== Claude Output ===\n` });
-
+  function spawnClaude(prompt) {
+    const cmd = 'claude -p --model haiku';
+    return new Promise((resolve, reject) => {
       const child = spawn('claude', ['-p', '--model', 'haiku'], {
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
-
-      // Send prompt via stdin instead of CLI arg (avoids OS arg length limits)
       child.stdin.write(prompt);
       child.stdin.end();
-
-      let stdout = '';
-      let stderr = '';
-
-      child.stdout.on('data', (chunk) => {
-        const text = chunk.toString();
-        stdout += text;
-        send('ai-log', { index, text });
-      });
-
-      child.stderr.on('data', (chunk) => {
-        const text = chunk.toString();
-        stderr += text;
-        send('ai-log', { index, text: `[stderr] ${text}` });
-      });
-
+      let stdout = '', stderr = '';
+      child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+      child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
       child.on('close', (code) => {
-        if (code !== 0 || !stdout.trim()) {
-          send('ai-error', { index, error: (stderr || `Exit code ${code}`) + '\n' + new Error('Claude process failed').stack });
-        } else {
-          try {
-            const text = stdout.trim();
-            const jsonMatch = text.match(/\{[\s\S]*\}/);
-            const status = JSON.parse(jsonMatch ? jsonMatch[0] : text);
-            const rawStatusText = status.statusText || 'Unknown';
-            const rawStatusClass = status.statusClass || 'warning';
-            const rawCiUrl = status.ciUrl || null;
-            // Save cache entry immediately
-            writeCacheEntry(cacheKey, {
-              statusText: rawStatusText,
-              statusClass: rawStatusClass,
-              ciUrl: rawCiUrl,
-              timestamp: new Date().toISOString(),
-            });
-            const { statusText, statusClass } = applyOverrides(pr, rawStatusText, rawStatusClass);
-            send('ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl });
-          } catch (e) {
-            console.error(`Parse error for ${pr.repo}#${pr.number}:`, e);
-            send('ai-error', { index, error: `Parse error: ${e.stack || e.message}\nRaw: ${stdout}` });
-          }
-        }
-        resolve();
+        if (code !== 0 || !stdout.trim()) reject(new Error(`Command failed: ${cmd}\n${stderr || `Exit code ${code}`}`));
+        else resolve(stdout.trim());
       });
-
-      child.on('error', (err) => {
-        console.error(`Spawn error for ${pr.repo}#${pr.number}:`, err);
-        send('ai-error', { index, error: err.stack || err.message });
-        resolve();
-      });
+      child.on('error', (err) => reject(new Error(`Command failed: ${cmd}\n${err.message}`)));
     });
+  }
+
+  async function runOneInner(index) {
+    const pr = allPRs[index];
+    if (pr.fetchError) return;
+    itemPhase[index] = 'initializing';
+    await chaosDelay();
+
+    // Lazy-load all details (deferred from Phase 1 for faster table render)
+    if (pr.isIssue) {
+      itemPhase[index] = `gh issue view ${pr.number} --repo ${pr.repo}`;
+      pr.details = await fetchIssueDetails(pr.repo, pr.number);
+    } else {
+      itemPhase[index] = `gh pr view ${pr.number} --repo ${pr.repo} + gh pr diff + gh api comments`;
+      const [summary, promptData] = await Promise.all([
+        fetchPRSummary(pr.repo, pr.number),
+        fetchPRPromptData(pr.repo, pr.number),
+      ]);
+      pr.details = { ...summary, ...promptData };
+      const repoShort = pr.repo.split('/').pop();
+      const branch = summary.headRefName || '';
+      const failing = (summary.statusCheckRollup || []).filter(c => {
+        const s = (c.conclusion || c.state || c.status || '').toUpperCase();
+        return s === 'FAILURE' || s === 'ERROR' || s === 'TIMED_OUT';
+      });
+      send('pr-details', { index, branch, repoShort, failing });
+      if (pr.section === 'mentioned') {
+        const myComments = (summary.comments || []).some(c => c.author?.login === ghUsername);
+        const myReviews = (summary.reviews || []).some(r => r.author?.login === ghUsername);
+        const myReviewComments = (promptData.reviewComments || []).some(rc => rc.user?.login === ghUsername);
+        pr.iResponded = myComments || myReviews || myReviewComments;
+      }
+    }
+
+    const prompt = buildPromptForItem(pr);
+    const cacheKey = hashPrompt(prompt);
+
+    // Check cache
+    const cached = readCacheEntry(cacheKey);
+    if (cached) {
+      send('ai-log', { index, text: `[AI response was cached to save tokens — ${cached.timestamp}]\n\n=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n` });
+      const { statusText, statusClass } = applyOverrides(pr, cached.statusText, cached.statusClass);
+      send('ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null });
+      return;
+    }
+
+    if (CHAOS && Math.random() < 0.3) {
+      throw new Error('[CHAOS] random Claude spawn failure');
+    }
+
+    send('ai-log', { index, text: `=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n\n=== Claude Output ===\n` });
+
+    itemPhase[index] = 'claude -p --model haiku';
+    const raw = await spawnClaude(prompt);
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    const status = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
+    const rawStatusText = status.statusText || 'Unknown';
+    const rawStatusClass = status.statusClass || 'warning';
+    const rawCiUrl = status.ciUrl || null;
+    writeCacheEntry(cacheKey, {
+      statusText: rawStatusText,
+      statusClass: rawStatusClass,
+      ciUrl: rawCiUrl,
+      timestamp: new Date().toISOString(),
+    });
+    const { statusText, statusClass } = applyOverrides(pr, rawStatusText, rawStatusClass);
+    send('ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl });
+  }
+
+  const itemPhase = {};
+
+  function withTimeout(promise, ms, index) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout after ${ms / 1000}s while ${itemPhase[index] || 'unknown phase'}`)), ms)),
+    ]);
+  }
+
+  async function runOne(index) {
+    const pr = allPRs[index];
+    try {
+      await withTimeout(runOneInner(index), RUN_ONE_TIMEOUT, index);
+    } catch (e) {
+      console.error(`[${index}] ${pr.repo}#${pr.number} failed:`, e);
+      if (!pr.isIssue) send('pr-details', { index, branch: '', repoShort: pr.repo.split('/').pop(), failing: [], error: e.message });
+      send('ai-error', { index, error: e.message.startsWith('Timeout') ? e.message : (e.stack || e.message) });
+    }
   }
 
   // Run with bounded concurrency
@@ -1048,7 +1041,13 @@ function handleAIStream(req, res) {
     if (!closed) res.end();
   }
 
-  runAll();
+  runAll().catch(err => {
+    console.error('runAll crashed:', err);
+    if (!closed) {
+      send('ai-error', { index: 0, error: `runAll crashed: ${err.stack || err.message}` });
+      res.end();
+    }
+  });
 }
 
 // === Index Page ===
