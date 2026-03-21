@@ -853,7 +853,7 @@ function handleAIStream(req, res) {
       // Check cache
       const cached = readCacheEntry(cacheKey);
       if (cached) {
-        send('ai-log', { index, text: `[cached — ${cached.timestamp}]\n` });
+        send('ai-log', { index, text: `[cached — ${cached.timestamp}]\n\n=== Prompt ===\n${prompt}\n` });
         const { statusText, statusClass } = applyOverrides(pr, cached.statusText, cached.statusClass);
         send('ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null });
         resolve();
