@@ -471,6 +471,24 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
             </tr>`;
   }
 
+  let updateHtml = '';
+  if (updateInfo) {
+    const commitItems = updateInfo.commits.map(c => {
+      const lines = c.split('\n');
+      const title = lines[0];
+      const body = lines.slice(1).join('\n').trim();
+      return `<li><strong>${escapeHtml(title)}</strong>${body ? `<br><span style="color:#484f58;white-space:pre-wrap">${escapeHtml(body)}</span>` : ''}</li>`;
+    }).join('');
+    updateHtml = `<div class="update-overlay" id="update-overlay" onclick="document.getElementById('update-overlay').style.display='none';document.getElementById('update-popup').style.display='none'"></div>
+    <div class="update-popup" id="update-popup">
+        <span style="color:#d29922;font-size:14px;font-weight:600">Update available</span>
+        <p style="color:#8b949e;margin:8px 0">${updateInfo.behind} new commit${updateInfo.behind > 1 ? 's' : ''}:</p>
+        <ul style="margin:4px 0 12px 20px;padding:0;color:#8b949e">${commitItems}</ul>
+        <span style="color:#c9d1d9">Run:</span>
+        <code>cd ~/github-status && pm2 stop github-status && git pull origin HEAD && pm2 start github-status</code>
+    </div>`;
+  }
+
   let idx = 0;
   const myRows = myPRs.map(pr => prRow(pr, false, idx++, false)).join('\n');
   const reviewRows = reviewPRs.map(pr => prRow(pr, true, idx++, false)).join('\n');
@@ -558,22 +576,16 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
             .ci-col { width: auto; order: 4; }
             .days-col { width: auto; order: 5; margin-left: auto; }
         }
-        .update-banner { position: fixed; top: 0; left: 0; right: 0; background: #1a1a2e; border-bottom: 2px solid #d29922; padding: 10px 20px; z-index: 100; display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
-        .update-banner code { background: #21262d; padding: 2px 6px; border-radius: 3px; color: #c9d1d9; }
-        .update-banner .dismiss { cursor: pointer; color: #8b949e; font-size: 16px; padding: 0 8px; }
-        .update-banner .dismiss:hover { color: #c9d1d9; }
+        .update-btn { background: none; border: 1px solid #d29922; color: #d29922; padding: 2px 8px; border-radius: 3px; font-family: inherit; font-size: 11px; cursor: pointer; margin-left: 12px; }
+        .update-btn:hover { background: #d29922; color: #0d1117; }
+        .update-popup { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; z-index: 200; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; font-size: 12px; }
+        .update-popup code { background: #21262d; padding: 2px 6px; border-radius: 3px; color: #c9d1d9; display: block; margin-top: 8px; }
+        .update-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 199; }
     </style>
 </head>
 <body>
-    ${updateInfo ? `<div class="update-banner" id="update-banner">
-        <div style="flex:1">
-            <span style="color:#d29922">Update available: ${updateInfo.behind} new commit${updateInfo.behind > 1 ? 's' : ''}</span>
-            <ul style="margin:4px 0 4px 20px;padding:0;color:#8b949e">${updateInfo.commits.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ul>
-            <span>Run: <code>cd ~/github-status && pm2 stop github-status && git pull origin HEAD && pm2 start github-status</code></span>
-        </div>
-        <span class="dismiss" onclick="document.getElementById('update-banner').remove()">\u2715</span>
-    </div>` : ''}
-    <h1>GitHub Status - ${date}</h1>
+    ${updateHtml}
+    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''}</h1>
     <div class="fold-controls"><a onclick="foldAll()">Fold all</a><a onclick="unfoldAll()">Unfold all</a></div>
 
     <h1 class="section-heading">Pull Requests</h1>
@@ -885,8 +897,8 @@ async function checkForUpdates() {
     const remote = (await runCmd('git', ['rev-parse', 'origin/main'])).trim();
     if (local !== remote) {
       const behind = (await runCmd('git', ['rev-list', '--count', `${local}..${remote}`])).trim();
-      const log = (await runCmd('git', ['log', '--oneline', `${local}..${remote}`])).trim();
-      const commits = log.split('\n').map(l => l.trim()).filter(Boolean);
+      const log = (await runCmd('git', ['log', '--format=%h %s%n%b%n---', `${local}..${remote}`])).trim();
+      const commits = log.split('\n---\n').map(l => l.trim()).filter(Boolean);
       return { behind: parseInt(behind), local: local.slice(0, 7), remote: remote.slice(0, 7), commits };
     }
   } catch (e) {
