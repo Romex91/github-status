@@ -147,8 +147,8 @@ async function fetchPRDetails(repo, number) {
   const [detailsRaw, diffRaw, reviewCommentsRaw] = await Promise.all([
     gh('pr', 'view', String(number), '--repo', repo,
       '--json', 'reviewDecision,statusCheckRollup,comments,reviews,updatedAt,isDraft,mergeable,labels,body,headRefName'),
-    gh('pr', 'diff', String(number), '--repo', repo).catch(() => '(diff unavailable)'),
-    gh('api', `repos/${repo}/pulls/${number}/comments`, '--paginate').catch(() => '[]'),
+    gh('pr', 'diff', String(number), '--repo', repo),
+    gh('api', `repos/${repo}/pulls/${number}/comments`, '--paginate'),
   ]);
   const details = JSON.parse(detailsRaw);
   details.diff = diffRaw.length > 20000 ? diffRaw.slice(0, 20000) + '\n... (truncated)' : diffRaw;
@@ -326,7 +326,7 @@ const REPO_COLORS = [
 const REPO_COLORS_PATH = new URL('./data/repo-colors.json', import.meta.url).pathname;
 
 function loadRepoColors() {
-  try { return JSON.parse(readFileSync(REPO_COLORS_PATH, 'utf8')); } catch { return {}; }
+  try { return JSON.parse(readFileSync(REPO_COLORS_PATH, 'utf8')); } catch (e) { console.error(`Failed to load repo colors: ${e.message}`); return {}; }
 }
 
 function saveRepoColors(map) {
@@ -353,7 +353,7 @@ const AI_CACHE_DIR = new URL('./data/ai-cache/', import.meta.url).pathname;
 mkdirSync(AI_CACHE_DIR, { recursive: true });
 
 function readCacheEntry(key) {
-  try { return JSON.parse(readFileSync(`${AI_CACHE_DIR}${key}.json`, 'utf8')); } catch { return null; }
+  try { return JSON.parse(readFileSync(`${AI_CACHE_DIR}${key}.json`, 'utf8')); } catch (e) { console.error(`Failed to read cache entry ${key}: ${e.message}`); return null; }
 }
 
 function writeCacheEntry(key, entry) {
@@ -375,7 +375,7 @@ function cleanAiCache(maxAgeDays = 3) {
         unlinkSync(`${AI_CACHE_DIR}${file}`);
         removed++;
       }
-    } catch { /* skip unreadable files */ }
+    } catch (e) { console.error(`Failed to process cache file ${file}: ${e.message}`); }
   }
   if (removed > 0) console.log(`Cleaned ${removed} stale cache entries`);
 }
@@ -404,6 +404,16 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     }).join('<br>');
   }
 
+  function statusCell(item, globalIndex) {
+    if (item.fetchError) {
+      return `<td class="status-col status-bad">Fetch failed: ${escapeHtml(item.fetchError)}</td>`;
+    }
+    return `<td class="status-col" id="status-${globalIndex}">
+                    <a href="#" class="ai-toggle" data-index="${globalIndex}" onclick="toggleLog(${globalIndex});return false">generating...</a>
+                    <div class="ai-log" id="ai-log-${globalIndex}"></div>
+                </td>`;
+  }
+
   function prRow(pr, includeAuthor, globalIndex, includeState) {
     const repoShort = pr.repo.split('/').pop();
     const authorSpan = includeAuthor ? ` <span class="author">@${escapeHtml(pr.author)}</span>` : '';
@@ -415,10 +425,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
                 <td class="title-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number} ${escapeHtml(pr.title)}</a>${authorSpan}${stateSpan}</td>
                 <td class="branch-col"><span class="branch-name" onclick="copyBranch(this)" title="Click to copy">${escapeHtml(branch)}</span></td>
-                <td class="status-col" id="status-${globalIndex}">
-                    <a href="#" class="ai-toggle" data-index="${globalIndex}" onclick="toggleLog(${globalIndex});return false">generating...</a>
-                    <div class="ai-log" id="ai-log-${globalIndex}"></div>
-                </td>
+                ${statusCell(pr, globalIndex)}
                 <td class="ci-col">${ci}</td>
                 <td class="days-col days-${daysClass(pr.days)}">${pr.days}d</td>
             </tr>`;
@@ -430,10 +437,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     return `            <tr>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
                 <td class="title-col"><a href="${escapeHtml(issue.html_url)}">#${issue.number} ${escapeHtml(issue.title)}</a></td>
-                <td class="status-col" id="status-${globalIndex}">
-                    <a href="#" class="ai-toggle" data-index="${globalIndex}" onclick="toggleLog(${globalIndex});return false">generating...</a>
-                    <div class="ai-log" id="ai-log-${globalIndex}"></div>
-                </td>
+                ${statusCell(issue, globalIndex)}
                 <td class="days-col days-${daysClass(issue.days)}">${issue.days}d</td>
             </tr>`;
   }
@@ -769,6 +773,7 @@ async function handleStatusStream(req, res) {
       } else {
         log(`Failed: ${allPRs[i].repo}#${allPRs[i].number}: ${result.reason?.message}`, 'error');
         allPRs[i].details = null;
+        allPRs[i].fetchError = result.reason?.message || 'Unknown error';
       }
       allPRs[i].days = daysSince(allPRs[i].updated_at);
 
@@ -788,6 +793,7 @@ async function handleStatusStream(req, res) {
       } else {
         log(`Failed: ${allIssues[i].repo}#${allIssues[i].number}: ${result.reason?.message}`, 'error');
         allIssues[i].details = null;
+        allIssues[i].fetchError = result.reason?.message || 'Unknown error';
       }
       allIssues[i].days = daysSince(allIssues[i].updated_at);
     });
@@ -863,6 +869,7 @@ function handleAIStream(req, res) {
   function runOne(index) {
     return new Promise((resolve) => {
       const pr = allPRs[index];
+      if (pr.fetchError) { resolve(); return; }
       const prompt = buildPromptForItem(pr);
       const cacheKey = hashPrompt(prompt);
 
