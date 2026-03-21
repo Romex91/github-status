@@ -156,7 +156,7 @@ async function fetchIssueDetails(repo, number) {
 
 async function fetchPRSummary(repo, number) {
   const raw = await gh('pr', 'view', String(number), '--repo', repo,
-    '--json', 'reviewDecision,statusCheckRollup,comments,reviews,updatedAt,isDraft,mergeable,labels,body,headRefName');
+    '--json', 'reviewDecision,statusCheckRollup,comments,reviews,reviewRequests,latestReviews,updatedAt,isDraft,mergeable,labels,body,headRefName');
   return JSON.parse(raw);
 }
 
@@ -247,13 +247,18 @@ function buildPromptForPR(pr) {
 
   const typeMap = { mine: 'My PR', review: 'Review requested from me', mentioned: 'Mentioned in this PR' };
 
+  const pendingReviewers = (d.reviewRequests || []).map(r => r.login || r.name || r.slug || 'unknown');
+  const latestReviews = (d.latestReviews || []).map(r => `${r.author?.login || 'unknown'}: ${r.state}`);
+
   const sections = [
     `Title: ${pr.title}`,
     `Repo: ${pr.repo}`,
     `Type: ${typeMap[pr.section] || 'Unknown'}`,
     pr.state ? `PR State: ${pr.state}` : null,
     `Draft: ${d.isDraft || false}`,
-    `Review decision: ${d.reviewDecision || 'NONE'}`,
+    `Review decision: ${d.reviewDecision || 'NONE'} (reflects branch protection rules — REVIEW_REQUIRED means approval requirements are NOT yet met)`,
+    `Pending review requests: ${pendingReviewers.length ? pendingReviewers.join(', ') : 'none'}`,
+    `Latest reviews: ${latestReviews.length ? latestReviews.join(', ') : 'none'}`,
     `Mergeable: ${d.mergeable || 'UNKNOWN'}`,
     `Labels: ${(d.labels || []).map(l => l.name).join(', ') || 'none'}`,
     `Days since last update: ${pr.days}`,
@@ -275,8 +280,9 @@ function buildPromptForPR(pr) {
 - bad: I was asked a question or requested an action and haven't responded`;
 
   const standardRules = `${commonRules}
+- Check approval requirements: reviewDecision "APPROVED" means all branch protection requirements are met. "REVIEW_REQUIRED" means approvals are still needed — mention pending reviewers by name.
 - good: Approved + CI green/no CI = ready to merge
-- warning: Awaiting review with CI passing/no CI, or approved with CI failures, or CI still running. Some questions or concerns are left unanswered.
+- warning: Awaiting review with CI passing/no CI, or approved with CI failures, or CI still running. Some questions or concerns are left unanswered. Mention who still needs to review.
 - bad: CI failures without approval, or stale 50+ days
 - For review-requested PRs: focus on what the reviewer needs to know`;
 
@@ -403,22 +409,6 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     const colors = { open: '#3fb950', merged: '#a371f7', closed: '#f85149' };
     const color = colors[state] || '#8b949e';
     return ` <span class="state-badge" style="color:${color};border-color:${color}">${state}</span>`;
-  }
-
-  function failingCiHtml(pr) {
-    const d = pr.details || {};
-    const checks = (d.statusCheckRollup || []);
-    const failing = checks.filter(c => {
-      const state = (c.conclusion || c.state || c.status || '').toUpperCase();
-      return state === 'FAILURE' || state === 'ERROR' || state === 'TIMED_OUT';
-    });
-    if (!failing.length) return '';
-    return failing.map(c => {
-      const rawName = (c.name || c.context || 'ci').replace(/^ci\/circleci:\s*/i, '');
-      const name = escapeHtml(rawName);
-      const url = c.detailsUrl || c.targetUrl || '';
-      return url ? `<a class="ci-link" href="${escapeHtml(url)}">${name}</a>` : `<span class="ci-link">${name}</span>`;
-    }).join('<br>');
   }
 
   function statusCell(item, globalIndex) {
