@@ -72,6 +72,7 @@ async function gh(...args) {
 // Store PR data between phases
 let pendingPRData = null;
 let ghUsername = null;
+let enqueueAIItems = null;
 
 // === Data Fetching ===
 
@@ -424,7 +425,7 @@ function cleanAiCache(maxAgeDays = 3) {
   if (removed > 0) console.log(`Cleaned ${removed} stale cache entries`);
 }
 
-function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, mentionedIssues, createdIssues, date) {
+function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, mentionedIssues, createdIssues, date, updateInfo) {
   function stateBadge(state) {
     if (!state) return '';
     const colors = { open: '#3fb950', merged: '#a371f7', closed: '#f85149' };
@@ -557,9 +558,17 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
             .ci-col { width: auto; order: 4; }
             .days-col { width: auto; order: 5; margin-left: auto; }
         }
+        .update-banner { position: fixed; top: 0; left: 0; right: 0; background: #1a1a2e; border-bottom: 2px solid #d29922; padding: 10px 20px; z-index: 100; display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+        .update-banner code { background: #21262d; padding: 2px 6px; border-radius: 3px; color: #c9d1d9; }
+        .update-banner .dismiss { cursor: pointer; color: #8b949e; font-size: 16px; padding: 0 8px; }
+        .update-banner .dismiss:hover { color: #c9d1d9; }
     </style>
 </head>
 <body>
+    ${updateInfo ? `<div class="update-banner" id="update-banner">
+        <span style="color:#d29922">Update available: ${updateInfo.behind} new commit${updateInfo.behind > 1 ? 's' : ''} (${updateInfo.local} \u2192 ${updateInfo.remote}). Run: <code>cd ~/github-status && pm2 stop github-status && git pull origin HEAD && pm2 start github-status</code></span>
+        <span class="dismiss" onclick="document.getElementById('update-banner').remove()">\u2715</span>
+    </div>` : ''}
     <h1>GitHub Status - ${date}</h1>
     <div class="fold-controls"><a onclick="foldAll()">Fold all</a><a onclick="unfoldAll()">Unfold all</a></div>
 
@@ -723,8 +732,6 @@ ${createdIssueRows}
 
         // Connect to AI status stream
         var es = new EventSource('/api/ai-stream');
-        var completed = 0;
-        var total = ${myPRs.length + reviewPRs.length + mentionedPRs.length + assignedIssues.length + mentionedIssues.length + createdIssues.length};
         var phaseTimers = {};
 
         es.addEventListener('ai-phase', function(e) {
@@ -796,8 +803,6 @@ ${createdIssueRows}
             statusSpan.className = 'status-text';
             statusSpan.textContent = d.statusText;
             cell.className = 'status-col status-' + d.statusClass;
-            completed++;
-            if (completed >= total) es.close();
         });
 
         es.addEventListener('ai-error', function(e) {
@@ -812,8 +817,6 @@ ${createdIssueRows}
             statusSpan.className = 'status-text';
             statusSpan.textContent = 'ERROR: ' + d.error;
             cell.className = 'status-col status-bad';
-            completed++;
-            if (completed >= total) es.close();
         });
 
         es.onerror = function() {
@@ -824,9 +827,66 @@ ${createdIssueRows}
         document.querySelectorAll('.status-text').forEach(function(el) {
             el.classList.add('loading');
         });
+
+        // Lazy-load: only request AI processing for items visible in the viewport
+        var enqueued = {};
+        var pendingEnqueue = [];
+        var enqueueTimer = null;
+
+        function flushEnqueue() {
+            enqueueTimer = null;
+            if (pendingEnqueue.length === 0) return;
+            var indices = pendingEnqueue.slice();
+            pendingEnqueue = [];
+            fetch('/api/ai-enqueue', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({indices: indices})
+            });
+        }
+
+        var observer = new IntersectionObserver(function(entries) {
+            entries.forEach(function(entry) {
+                if (!entry.isIntersecting) return;
+                var idx = parseInt(entry.target.getAttribute('data-idx'));
+                if (isNaN(idx) || enqueued[idx]) return;
+                enqueued[idx] = true;
+                pendingEnqueue.push(idx);
+                observer.unobserve(entry.target);
+            });
+            if (pendingEnqueue.length > 0 && !enqueueTimer) {
+                enqueueTimer = setTimeout(flushEnqueue, 50);
+            }
+        }, { rootMargin: '200px' });
+
+        document.querySelectorAll('[id^="status-"]').forEach(function(cell) {
+            var idx = parseInt(cell.id.replace('status-', ''));
+            var row = cell.closest('tr');
+            if (row) {
+                row.setAttribute('data-idx', idx);
+                observer.observe(row);
+            }
+        });
     </script>
 </body>
 </html>`;
+}
+
+// === Version Check ===
+
+async function checkForUpdates() {
+  try {
+    await runCmd('git', ['fetch', 'origin', '--quiet']);
+    const local = (await runCmd('git', ['rev-parse', 'HEAD'])).trim();
+    const remote = (await runCmd('git', ['rev-parse', 'origin/main'])).trim();
+    if (local !== remote) {
+      const behind = (await runCmd('git', ['rev-list', '--count', `${local}..${remote}`])).trim();
+      return { behind: parseInt(behind), local: local.slice(0, 7), remote: remote.slice(0, 7) };
+    }
+  } catch (e) {
+    console.error('Version check failed:', e.message);
+  }
+  return null;
 }
 
 // === SSE: Phase 1 - Fetch PR data, send dashboard HTML ===
@@ -847,7 +907,7 @@ async function handleStatusStream(req, res) {
   }
 
   try {
-    const [myPRs, reviewPRs, rawMentionedPRs, username, assignedIssues, rawMentionedIssues, rawCreatedIssues] = await Promise.all([
+    const [myPRs, reviewPRs, rawMentionedPRs, username, assignedIssues, rawMentionedIssues, rawCreatedIssues, updateInfo] = await Promise.all([
       fetchMyPRs(log),
       fetchReviewPRs(log),
       fetchMentionedPRs(log),
@@ -855,6 +915,7 @@ async function handleStatusStream(req, res) {
       fetchAssignedIssues(log),
       fetchMentionedIssues(log),
       fetchCreatedIssues(log),
+      checkForUpdates(),
     ]);
     ghUsername = username;
 
@@ -902,7 +963,7 @@ async function handleStatusStream(req, res) {
     const assignedIssuesForHtml = allItems.filter(i => i.section === 'assigned-issue');
     const mentionedIssuesForHtml = allItems.filter(i => i.section === 'mentioned-issue');
     const createdIssuesForHtml = allItems.filter(i => i.section === 'created-issue');
-    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, mentionedPRsForHtml, assignedIssuesForHtml, mentionedIssuesForHtml, createdIssuesForHtml, date);
+    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, mentionedPRsForHtml, assignedIssuesForHtml, mentionedIssuesForHtml, createdIssuesForHtml, date, updateInfo);
 
     if (!closed) {
       res.write(`event: done\ndata: ${JSON.stringify({ html })}\n\n`);
@@ -928,7 +989,7 @@ function handleAIStream(req, res) {
   });
 
   let closed = false;
-  req.on('close', () => { closed = true; });
+  req.on('close', () => { closed = true; enqueueAIItems = null; cleanAiCache(); });
 
   function send(event, data) {
     if (closed) return;
@@ -1066,35 +1127,29 @@ function handleAIStream(req, res) {
     completed.add(index);
   }
 
-  // Run with bounded concurrency
-  async function runAll() {
-    const queue = allPRs.map((_, i) => i);
-    const running = new Set();
+  // Lazy-load: process items on demand as they scroll into view
+  const queued = new Set();
+  const waiting = [];
+  const running = new Set();
 
-    while (queue.length > 0 || running.size > 0) {
-      while (queue.length > 0 && running.size < CONCURRENCY) {
-        const idx = queue.shift();
-        const p = runOne(idx)
-          .catch(e => console.error(`Unexpected runOne rejection for index ${idx}:`, e))
-          .finally(() => running.delete(p));
-        running.add(p);
-      }
-      if (running.size > 0) await Promise.race(running);
+  function drain() {
+    while (waiting.length > 0 && running.size < CONCURRENCY && !closed) {
+      const idx = waiting.shift();
+      const p = runOne(idx)
+        .catch(e => console.error(`Unexpected runOne error for ${idx}:`, e))
+        .finally(() => { running.delete(p); drain(); });
+      running.add(p);
     }
-
-    // Mark any remaining items as errored (should not happen, but just in case)
-    for (let i = 0; i < allPRs.length; i++) {
-      if (!completed.has(i)) {
-        console.error(`Item ${i} never completed — sending error`);
-        send('ai-error', { index: i, error: 'Item was never processed' });
-      }
-    }
-
-    cleanAiCache();
-    if (!closed) res.end();
   }
 
-  runAll();
+  enqueueAIItems = function(indices) {
+    for (const idx of indices) {
+      if (queued.has(idx) || idx < 0 || idx >= allPRs.length) continue;
+      queued.add(idx);
+      waiting.push(idx);
+    }
+    drain();
+  };
 }
 
 // === Index Page ===
@@ -1180,6 +1235,20 @@ const server = http.createServer((req, res) => {
     handleStatusStream(req, res);
   } else if (req.url === '/api/ai-stream' && req.method === 'GET') {
     handleAIStream(req, res);
+  } else if (req.url === '/api/ai-enqueue' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { indices } = JSON.parse(body);
+        if (enqueueAIItems && Array.isArray(indices)) enqueueAIItems(indices);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{"ok":true}');
+      } catch {
+        res.writeHead(400);
+        res.end('Bad request');
+      }
+    });
   } else {
     res.writeHead(404);
     res.end('Not found');
