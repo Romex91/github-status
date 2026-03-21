@@ -1,9 +1,7 @@
 import http from 'node:http';
-import { execFile, spawn } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-const execAsync = promisify(execFile);
 const PORT = process.env.PORT || 7777;
 
 // === Helpers ===
@@ -34,22 +32,41 @@ function todayStr() {
 // SKULLS TO THE SKULL GOD
 const CHAOS = true;
 
-function chaosDelay() {
-  if (!CHAOS) return Promise.resolve();
-  const ms = Math.floor(Math.random() * 5000);
-  return new Promise(resolve => setTimeout(resolve, ms));
+const CMD_TIMEOUT = 60000;
+
+function runCmd(bin, args, { stdin, env: cmdEnv, signal } = {}) {
+  const cmd = `${bin} ${args.join(' ')}`;
+  let shellBin = bin, shellArgs = args;
+  if (CHAOS) {
+    const escaped = args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+    shellBin = 'sh';
+    shellArgs = ['-c', `./bin/chaotic-testing && ${bin} ${escaped}`];
+  }
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new Error(`Aborted before start: ${cmd}`)); return; }
+    const child = spawn(shellBin, shellArgs, { env: cmdEnv, stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+    const kill = () => { child.kill('SIGTERM'); setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 2000); };
+    const timer = setTimeout(kill, CMD_TIMEOUT);
+    const onAbort = () => { kill(); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (stdin) { child.stdin.write(stdin); child.stdin.end(); }
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (c) => { stdout += c; });
+    child.stderr.on('data', (c) => { stderr += c; });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      if (signal?.aborted) reject(new Error(`Aborted: ${cmd}`));
+      else if (code === 0 && stdout.trim()) resolve(stdout.trim());
+      else reject(new Error(code === null ? `Command timed out after ${CMD_TIMEOUT / 1000}s: ${cmd}` : `Command failed: ${cmd}\n${stderr || `Exit code ${code}`}`));
+    });
+    child.on('error', (err) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); reject(new Error(`Command failed: ${cmd}\n${err.message}`)); });
+  });
 }
 
 async function gh(...args) {
-  const cmd = `gh ${args.join(' ')}`;
-  try {
-    await chaosDelay();
-    if (CHAOS && Math.random() < 0.05) throw new Error('[CHAOS] random failure');
-    const { stdout } = await execAsync('gh', args, { maxBuffer: 10 * 1024 * 1024 });
-    return stdout;
-  } catch (e) {
-    throw new Error(`Command failed: ${cmd}\n${e.message}`);
-  }
+  const signal = args.length && args[args.length - 1] instanceof AbortSignal ? args.pop() : undefined;
+  return runCmd('gh', args, { signal });
 }
 
 // Store PR data between phases
@@ -153,22 +170,22 @@ async function fetchCreatedIssues(log) {
   return issues;
 }
 
-async function fetchIssueDetails(repo, number) {
+async function fetchIssueDetails(repo, number, signal) {
   const raw = await gh('issue', 'view', String(number), '--repo', repo,
-    '--json', 'comments,labels,body,assignees');
+    '--json', 'comments,labels,body,assignees', signal);
   return JSON.parse(raw);
 }
 
-async function fetchPRSummary(repo, number) {
+async function fetchPRSummary(repo, number, signal) {
   const raw = await gh('pr', 'view', String(number), '--repo', repo,
-    '--json', 'reviewDecision,statusCheckRollup,comments,reviews,reviewRequests,latestReviews,updatedAt,isDraft,mergeable,labels,body,headRefName');
+    '--json', 'reviewDecision,statusCheckRollup,comments,reviews,reviewRequests,latestReviews,updatedAt,isDraft,mergeable,labels,body,headRefName', signal);
   return JSON.parse(raw);
 }
 
-async function fetchPRPromptData(repo, number) {
+async function fetchPRPromptData(repo, number, signal) {
   const [diffRaw, reviewCommentsRaw] = await Promise.all([
-    gh('pr', 'diff', String(number), '--repo', repo),
-    gh('api', `repos/${repo}/pulls/${number}/comments`, '--paginate'),
+    gh('pr', 'diff', String(number), '--repo', repo, signal),
+    gh('api', `repos/${repo}/pulls/${number}/comments`, '--paginate', signal),
   ]);
   return {
     diff: diffRaw.length > 20000 ? diffRaw.slice(0, 20000) + '\n... (truncated)' : diffRaw,
@@ -914,43 +931,25 @@ function handleAIStream(req, res) {
     return { statusText, statusClass };
   }
 
-  const RUN_ONE_TIMEOUT = CHAOS ? 5000 : 60000;
+  const RUN_ONE_TIMEOUT = CMD_TIMEOUT * 3;
 
-  function spawnClaude(prompt) {
-    const cmd = 'claude -p --model haiku';
-    return new Promise((resolve, reject) => {
-      const child = spawn('claude', ['-p', '--model', 'haiku'], {
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      child.stdin.write(prompt);
-      child.stdin.end();
-      let stdout = '', stderr = '';
-      child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-      child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-      child.on('close', (code) => {
-        if (code !== 0 || !stdout.trim()) reject(new Error(`Command failed: ${cmd}\n${stderr || `Exit code ${code}`}`));
-        else resolve(stdout.trim());
-      });
-      child.on('error', (err) => reject(new Error(`Command failed: ${cmd}\n${err.message}`)));
-    });
+  function spawnClaude(prompt, signal) {
+    return runCmd('claude', ['-p', '--model', 'haiku'], { stdin: prompt, env, signal });
   }
 
-  async function runOneInner(index) {
+  async function runOneInner(index, signal) {
     const pr = allPRs[index];
     if (pr.fetchError) return;
-    itemPhase[index] = 'initializing';
-    await chaosDelay();
 
     // Lazy-load all details (deferred from Phase 1 for faster table render)
     if (pr.isIssue) {
       itemPhase[index] = `gh issue view ${pr.number} --repo ${pr.repo}`;
-      pr.details = await fetchIssueDetails(pr.repo, pr.number);
+      pr.details = await fetchIssueDetails(pr.repo, pr.number, signal);
     } else {
       itemPhase[index] = `gh pr view ${pr.number} --repo ${pr.repo} + gh pr diff + gh api comments`;
       const [summary, promptData] = await Promise.all([
-        fetchPRSummary(pr.repo, pr.number),
-        fetchPRPromptData(pr.repo, pr.number),
+        fetchPRSummary(pr.repo, pr.number, signal),
+        fetchPRPromptData(pr.repo, pr.number, signal),
       ]);
       pr.details = { ...summary, ...promptData };
       const repoShort = pr.repo.split('/').pop();
@@ -968,7 +967,10 @@ function handleAIStream(req, res) {
       }
     }
 
-    const prompt = buildPromptForItem(pr);
+    let prompt = buildPromptForItem(pr);
+    if (CHAOS && Math.random() < 0.1) {
+      prompt = 'Respond with only: CHAOS REIGNS';
+    }
     const cacheKey = hashPrompt(prompt);
 
     // Check cache
@@ -980,14 +982,10 @@ function handleAIStream(req, res) {
       return;
     }
 
-    if (CHAOS && Math.random() < 0.3) {
-      throw new Error('[CHAOS] random Claude spawn failure');
-    }
-
     sendIfActive(index, 'ai-log', { index, text: `=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n\n=== Claude Output ===\n` });
 
     itemPhase[index] = 'claude -p --model haiku';
-    const raw = await spawnClaude(prompt);
+    const raw = await spawnClaude(prompt, signal);
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     const status = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
     const rawStatusText = status.statusText || 'Unknown';
@@ -1005,13 +1003,6 @@ function handleAIStream(req, res) {
 
   const itemPhase = {};
 
-  function withTimeout(promise, ms, index) {
-    return Promise.race([
-      promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout after ${ms / 1000}s while ${itemPhase[index] || 'unknown phase'}`)), ms)),
-    ]);
-  }
-
   const completed = new Set();
   const aborted = new Set();
 
@@ -1022,13 +1013,19 @@ function handleAIStream(req, res) {
 
   async function runOne(index) {
     const pr = allPRs[index];
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), RUN_ONE_TIMEOUT);
     try {
-      await withTimeout(runOneInner(index), RUN_ONE_TIMEOUT, index);
+      await runOneInner(index, ac.signal);
     } catch (e) {
       aborted.add(index); // prevent zombie runOneInner from sending events
+      const phase = itemPhase[index] || 'unknown phase';
+      if (e.name === 'AbortError' || ac.signal.aborted) e = new Error(`Timeout after ${RUN_ONE_TIMEOUT / 1000}s while ${phase}`);
       console.error(`[${index}] ${pr.repo}#${pr.number} failed:`, e);
       if (!pr.isIssue) send('pr-details', { index, branch: '', repoShort: pr.repo.split('/').pop(), failing: [], error: e.message });
       send('ai-error', { index, error: e.message.startsWith('Timeout') ? e.message : (e.stack || e.message) });
+    } finally {
+      clearTimeout(timer);
     }
     completed.add(index);
   }
