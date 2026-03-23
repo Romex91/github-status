@@ -2,7 +2,11 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { launchChat } from './launch-chat.js';
+import { join } from 'node:path';
+import { launchChat, cleanChatPrompts } from './launch-chat.js';
+import { scanForClones } from './repo-scan.js';
+
+const PROJECT_DIR = new URL('.', import.meta.url).pathname;
 const PORT = process.env.PORT || 7777;
 
 // === Helpers ===
@@ -516,7 +520,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     }
     return `<td class="status-col" id="status-${globalIndex}">
                     <span class="status-text">waiting...</span>
-                    <br><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span><span class="chat-btn" onclick="chatPR(${globalIndex})">chat</span>
+                    <br><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span><span class="chat-btn" onclick="showRepoSelectionDialog(${globalIndex})">chat</span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
   }
@@ -792,20 +796,6 @@ ${createdIssueRows}
             document.querySelectorAll('h2').forEach(function(h) { h.classList.remove('folded'); });
         }
 
-        function chatPR(index) {
-            var btn = document.querySelector('[onclick="chatPR(' + index + ')"]');
-            if (btn) btn.style.pointerEvents = 'none';
-            fetch('/api/chat', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({index: index})
-            }).then(function(r) { return r.json(); }).then(function(d) {
-                if (btn) btn.style.pointerEvents = '';
-                if (d.error) { alert('Chat: ' + d.error); return; }
-                if (btn) showCopyToast(btn, 'opened terminal window');
-            });
-        }
-
         function copyPrompt(index) {
             var log = document.getElementById('ai-log-' + index);
             var text = log.textContent || '';
@@ -987,6 +977,7 @@ ${createdIssueRows}
             }
         });
     </script>
+    <script src="/public/repo-picker.js"></script>
 </body>
 </html>`;
 }
@@ -1111,7 +1102,7 @@ function handleAIStream(req, res) {
   });
 
   let closed = false;
-  req.on('close', () => { closed = true; enqueueAIItems = null; cleanAiCache(); });
+  req.on('close', () => { closed = true; enqueueAIItems = null; cleanAiCache(); cleanChatPrompts(); });
 
   function send(event, data) {
     if (closed) return;
@@ -1381,13 +1372,12 @@ const server = http.createServer((req, res) => {
     req.on('data', c => body += c);
     req.on('end', () => {
       try {
-        const { index } = JSON.parse(body);
+        const { index, action, clonePath } = JSON.parse(body);
         const pr = pendingPRData && pendingPRData[index];
         if (!pr) { res.writeHead(404); res.end(JSON.stringify({ error: 'Item not found. Reload the page.' })); return; }
-        if (!pr.chatContext) { res.writeHead(400); res.end(JSON.stringify({ error: 'AI analysis not yet complete for this item.' })); return; }
 
         launchChat({
-          prompt: pr.chatContext,
+          prompt: pr.chatContext || '',
           url: pr.html_url,
           repo: pr.repo,
           number: pr.number,
@@ -1395,6 +1385,8 @@ const server = http.createServer((req, res) => {
           isIssue: pr.isIssue,
           branch: pr.details?.headRefName || '',
           aiStatus: pr.aiStatus || '',
+          action: action || 'chat-here',
+          clonePath: clonePath || '',
         });
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1405,6 +1397,49 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ error: e.message }));
       }
     });
+  } else if (req.url === '/api/repo-scan' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', async () => {
+      try {
+        const { index } = JSON.parse(body);
+        const pr = pendingPRData && pendingPRData[index];
+        if (!pr) { res.writeHead(404); res.end(JSON.stringify({ error: 'Item not found. Reload the page.' })); return; }
+
+        const scanResult = await scanForClones(
+          pr.repo,
+          pr.isIssue ? null : (pr.details?.headRefName || null)
+        );
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          ...scanResult,
+          title: pr.title,
+          number: pr.number,
+          isIssue: pr.isIssue,
+          url: pr.html_url,
+          aiStatus: pr.aiStatus || '',
+        }));
+      } catch (e) {
+        console.error('Repo scan failed:', e);
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+  } else if (req.url.startsWith('/public/') && req.method === 'GET') {
+    const filePath = join(PROJECT_DIR, req.url);
+    if (!filePath.startsWith(join(PROJECT_DIR, 'public'))) {
+      res.writeHead(403); res.end('Forbidden'); return;
+    }
+    try {
+      const content = readFileSync(filePath, 'utf8');
+      const ext = filePath.split('.').pop();
+      const mimeTypes = { js: 'application/javascript', css: 'text/css', html: 'text/html' };
+      res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'text/plain' });
+      res.end(content);
+    } catch {
+      res.writeHead(404); res.end('Not found');
+    }
   } else {
     res.writeHead(404);
     res.end('Not found');
