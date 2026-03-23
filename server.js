@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -1427,6 +1427,29 @@ const server = http.createServer((req, res) => {
         }));
       } catch (e) {
         console.error('Repo scan failed:', e);
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+  } else if (req.url === '/api/repo-sync' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const { action, clonePath, branch } = JSON.parse(body);
+        if (!clonePath) { res.writeHead(400); res.end(JSON.stringify({ error: 'No clone path.' })); return; }
+        if (action === 'checkout' && branch) {
+          execSync(`git fetch origin`, { cwd: clonePath, encoding: 'utf8', timeout: 30000 });
+          execSync(`git checkout ${branch}`, { cwd: clonePath, encoding: 'utf8', timeout: 10000 });
+        } else if (action === 'pull') {
+          execSync('git pull', { cwd: clonePath, encoding: 'utf8', timeout: 30000 });
+        } else {
+          res.writeHead(400); res.end(JSON.stringify({ error: `Unknown sync action: ${action}` })); return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{"ok":true}');
+      } catch (e) {
+        console.error('Repo sync failed:', e);
         res.writeHead(500);
         res.end(JSON.stringify({ error: e.message }));
       }

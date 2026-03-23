@@ -148,6 +148,34 @@ function renderRepoSelectionDialog(dlg, data, index) {
     };
   }
 
+  // Wire up sync buttons (checkout/pull) — enables sibling chat/IDE buttons on success
+  dlg.modal.querySelectorAll('[data-sync]').forEach(function (btn) {
+    btn.onclick = function () {
+      var action = btn.getAttribute('data-sync');
+      var clonePath = btn.getAttribute('data-clone');
+      var branchName = btn.getAttribute('data-branch');
+      var row = btn.closest('.dlg-clone-row');
+      btn.disabled = true;
+      btn.textContent = action === 'pull' ? 'Pulling\u2026' : 'Checking out\u2026';
+      fetch('/api/repo-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, clonePath: clonePath, branch: branchName })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.error) { btn.disabled = false; btn.textContent = 'Retry'; alert(d.error); return; }
+          btn.remove();
+          // Enable sibling action/IDE buttons in this row
+          row.querySelectorAll('[data-action][disabled], [data-ide][disabled]').forEach(function (b) {
+            b.disabled = false;
+            b.classList.add('dlg-btn-primary');
+          });
+        })
+        .catch(function (err) { btn.disabled = false; btn.textContent = 'Retry'; alert(err.message); });
+    };
+  });
+
   // Wire up all action buttons
   dlg.modal.querySelectorAll('[data-action]').forEach(function (btn) {
     btn.onclick = function () {
@@ -180,11 +208,11 @@ function renderRepoSelectionDialog(dlg, data, index) {
   });
 }
 
-function ideButtons(clonePath) {
+function ideButtons(clonePath, disabled) {
   var ides = (typeof INSTALLED_IDES !== 'undefined') ? INSTALLED_IDES : [];
   var html = '';
   for (var i = 0; i < ides.length; i++) {
-    html += '<button class="dlg-btn dlg-btn-primary" data-ide="' + esc(ides[i].cmd) + '" data-clone="' + esc(clonePath) + '">' + esc(ides[i].name) + '</button>';
+    html += '<button class="dlg-btn' + (disabled ? '' : ' dlg-btn-primary') + '" data-ide="' + esc(ides[i].cmd) + '" data-clone="' + esc(clonePath) + '"' + (disabled ? ' disabled' : '') + '>' + esc(ides[i].name) + '</button>';
   }
   return html;
 }
@@ -210,26 +238,17 @@ function renderCloneRow(clone, branch) {
 
   // Action buttons row
   html += '<div class="dlg-actions" style="width:100%;margin-top:4px">';
-  var usable = true;
-  if (clone.onPRBranch) {
-    if (clone.dirty && clone.behindOrigin) {
-      html += '<span style="color:#f85149;font-size:10px">dirty + behind origin \u2014 resolve manually</span>';
-      usable = false;
-    } else if (clone.behindOrigin) {
-      html += '<button class="dlg-btn dlg-btn-primary" data-action="pull" data-clone="' + esc(clone.path) + '">Pull &amp; chat</button>';
-      html += '<button class="dlg-btn dlg-btn-primary" data-action="chat-here" data-clone="' + esc(clone.path) + '">Chat as-is</button>';
-    } else {
-      html += '<button class="dlg-btn dlg-btn-primary" data-action="chat-here" data-clone="' + esc(clone.path) + '">Chat in terminal</button>';
-    }
-  } else if (!clone.dirty) {
-    html += '<button class="dlg-btn dlg-btn-primary" data-action="checkout" data-clone="' + esc(clone.path) + '">Checkout &amp; chat</button>';
+  if (clone.dirty && (clone.behindOrigin || !clone.onPRBranch)) {
+    html += '<span style="color:#f85149;font-size:10px">dirty \u2014 commit or stash first</span>';
+  } else if (clone.behindOrigin || !clone.onPRBranch) {
+    var syncLabel = !clone.onPRBranch ? 'Checkout branch' : 'Pull latest';
+    var syncAction = !clone.onPRBranch ? 'checkout' : 'pull';
+    html += '<button class="dlg-btn dlg-btn-primary" data-sync="' + syncAction + '" data-clone="' + esc(clone.path) + '" data-branch="' + esc(branch || '') + '">' + syncLabel + '</button>';
+    html += '<button class="dlg-btn" data-action="chat-here" data-clone="' + esc(clone.path) + '" disabled>Chat in terminal</button>';
+    html += ideButtons(clone.path, true);
   } else {
-    html += '<span style="color:#d29922;font-size:10px">dirty \u2014 commit or stash first</span>';
-    usable = false;
-  }
-  // IDE buttons for usable clones
-  if (usable) {
-    html += ideButtons(clone.path);
+    html += '<button class="dlg-btn dlg-btn-primary" data-action="chat-here" data-clone="' + esc(clone.path) + '">Chat in terminal</button>';
+    html += ideButtons(clone.path, false);
   }
   html += '</div>';
 

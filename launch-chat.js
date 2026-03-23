@@ -82,7 +82,7 @@ ${prompt}
   const workDir = clonePath;
 
   // Launch terminal with claude reading the prompt file
-  const claudeCmd = `claude --append-system-prompt-file ${JSON.stringify(promptFile)}`;
+  const claudeCmd = `claude --append-system-prompt-file ${JSON.stringify(promptFile)} "In short sentence, summarize the context"`;
 
   if (platform() === 'win32') {
     const script = `@echo off\r\ncd /d ${JSON.stringify(workDir)}\r\n${claudeCmd}\r\n`;
