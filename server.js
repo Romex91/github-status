@@ -306,7 +306,39 @@ function buildContextForPR(pr) {
   const typeMap = { mine: 'My PR', review: 'Review requested from me', mentioned: 'Mentioned in this PR' };
 
   const pendingReviewers = (d.reviewRequests || []).map(r => r.login || r.name || r.slug || 'unknown');
-  const latestReviews = (d.latestReviews || []).map(r => `${r.author?.login || 'unknown'}: ${r.state}`);
+  // Resolve effective review state: COMMENTED doesn't override a prior APPROVED
+  const effectiveReviewState = new Map();
+  for (const r of (d.reviews || [])) {
+    const login = r.author?.login;
+    if (!login) continue;
+    if (r.state === 'COMMENTED' && effectiveReviewState.get(login) === 'APPROVED') continue;
+    effectiveReviewState.set(login, r.state);
+  }
+  const latestReviews = [...effectiveReviewState].map(([login, state]) => `${login}: ${state}`);
+
+  // Detect reviewers whose comments are all in outdated threads
+  const reviewerComments = new Map();
+  for (const rc of (d.reviewComments || [])) {
+    const author = rc.user?.login;
+    if (!author) continue;
+    if (!reviewerComments.has(author)) reviewerComments.set(author, { total: 0, outdated: 0 });
+    const entry = reviewerComments.get(author);
+    entry.total++;
+    if (rc.isOutdated) entry.outdated++;
+  }
+  // A reviewer who approved still counts as approved even if they later left a COMMENTED review
+  const approvedAuthors = new Set();
+  const resolvedAuthors = new Set();
+  for (const r of (d.reviews || []).slice().reverse()) {
+    const login = r.author?.login;
+    if (!login || resolvedAuthors.has(login)) continue;
+    if (r.state === 'APPROVED') { approvedAuthors.add(login); resolvedAuthors.add(login); }
+    else if (r.state !== 'COMMENTED') resolvedAuthors.add(login);
+  }
+  const needReReview = [];
+  for (const [author, { total, outdated }] of reviewerComments) {
+    if (total > 0 && total === outdated && !approvedAuthors.has(author)) needReReview.push(author);
+  }
 
   return [
     `Title: ${pr.title}`,
@@ -317,6 +349,7 @@ function buildContextForPR(pr) {
     `Review decision: ${d.reviewDecision || 'NONE'} (reflects branch protection rules — REVIEW_REQUIRED means approval requirements are NOT yet met)`,
     `Pending review requests: ${pendingReviewers.length ? pendingReviewers.join(', ') : 'none'}`,
     `Latest reviews: ${latestReviews.length ? latestReviews.join(', ') : 'none'}`,
+    needReReview.length ? `IMPORTANT! Need to re-request review from: ${needReReview.map(u => '@' + u).join(', ')} (all their comments are in outdated threads)` : null,
     `Mergeable: ${d.mergeable || 'UNKNOWN'}`,
     `Labels: ${(d.labels || []).map(l => l.name).join(', ') || 'none'}`,
     `Days since last update: ${pr.days}`,
