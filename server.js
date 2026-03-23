@@ -5,9 +5,13 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { launchChat, cleanChatPrompts } from './launch-chat.js';
 import { scanForClones } from './repo-scan.js';
+import { detectIDEs } from './ide-detect.js';
 
 const PROJECT_DIR = new URL('.', import.meta.url).pathname;
 const PORT = process.env.PORT || 7777;
+
+const installedIDEs = detectIDEs();
+console.log(`Detected IDEs: ${installedIDEs.map(i => i.name).join(', ') || 'none'}`);
 
 // === Helpers ===
 
@@ -520,7 +524,7 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
     }
     return `<td class="status-col" id="status-${globalIndex}">
                     <span class="status-text">waiting...</span>
-                    <br><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span><span class="chat-btn" onclick="showRepoSelectionDialog(${globalIndex})">chat</span>
+                    <br><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span><span class="action-btn" onclick="showRepoSelectionDialog(${globalIndex})">actions</span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
   }
@@ -643,8 +647,8 @@ function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, ment
         .status-text.loading { color: #d29922; }
         .copy-prompt { cursor: pointer; color: #484f58; font-size: 10px; position: relative; }
         .copy-prompt:hover { color: #58a6ff; }
-        .chat-btn { cursor: pointer; color: #484f58; font-size: 10px; margin-left: 8px; }
-        .chat-btn:hover { color: #58a6ff; }
+        .action-btn { cursor: pointer; color: #484f58; font-size: 10px; margin-left: 8px; }
+        .action-btn:hover { color: #58a6ff; }
         .prompt-tooltip { display: none; position: absolute; left: 0; top: 100%; background: #161b22; border: 1px solid #30363d; border-radius: 4px; padding: 6px 8px; color: #8b949e; font-size: 11px; white-space: pre-wrap; width: max-content; max-width: 600px; max-height: 80vh; overflow-y: auto; z-index: 10; margin-top: 4px; }
         .copy-prompt:hover .prompt-tooltip { display: block; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
@@ -977,6 +981,7 @@ ${createdIssueRows}
             }
         });
     </script>
+    <script>var INSTALLED_IDES = ${JSON.stringify(installedIDEs)};</script>
     <script src="/public/repo-picker.js"></script>
 </body>
 </html>`;
@@ -1422,6 +1427,26 @@ const server = http.createServer((req, res) => {
         }));
       } catch (e) {
         console.error('Repo scan failed:', e);
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+  } else if (req.url === '/api/open-ide' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', async () => {
+      try {
+        const { cmd, clonePath } = JSON.parse(body);
+        const ide = installedIDEs.find(i => i.cmd === cmd);
+        if (!ide) { res.writeHead(400); res.end(JSON.stringify({ error: `IDE "${cmd}" not found.` })); return; }
+        if (!clonePath) { res.writeHead(400); res.end(JSON.stringify({ error: 'No clone path provided.' })); return; }
+
+        spawn(ide.cmd, [clonePath], { stdio: 'ignore', detached: true }).unref();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        console.error('Open IDE failed:', e);
         res.writeHead(500);
         res.end(JSON.stringify({ error: e.message }));
       }

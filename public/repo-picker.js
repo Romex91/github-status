@@ -1,4 +1,4 @@
-/* global showCopyToast */
+/* global showCopyToast INSTALLED_IDES */
 
 // ─── Styles (injected once) ────────────────────────────────────────────
 
@@ -157,15 +157,45 @@ function renderRepoSelectionDialog(dlg, data, index) {
       launchAction(dlg, index, action, clonePath);
     };
   });
+
+  // Wire up IDE buttons
+  dlg.modal.querySelectorAll('[data-ide]').forEach(function (btn) {
+    btn.onclick = function () {
+      var cmd = btn.getAttribute('data-ide');
+      var clonePath = btn.getAttribute('data-clone');
+      btn.disabled = true;
+      fetch('/api/open-ide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cmd: cmd, clonePath: clonePath })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          btn.disabled = false;
+          if (d.error) { alert(d.error); return; }
+          dlg.close();
+        })
+        .catch(function () { btn.disabled = false; });
+    };
+  });
+}
+
+function ideButtons(clonePath) {
+  var ides = (typeof INSTALLED_IDES !== 'undefined') ? INSTALLED_IDES : [];
+  var html = '';
+  for (var i = 0; i < ides.length; i++) {
+    html += '<button class="dlg-btn dlg-btn-primary" data-ide="' + esc(ides[i].cmd) + '" data-clone="' + esc(clonePath) + '">' + esc(ides[i].name) + '</button>';
+  }
+  return html;
 }
 
 function renderCloneRow(clone, branch) {
   var homePath = clone.path.replace(/^\/Users\/[^/]+/, '~');
-  var html = '<li class="dlg-clone-row">';
+  var html = '<li class="dlg-clone-row" style="flex-wrap:wrap">';
+
+  // Top line: path, branch, badges
   html += '<span class="dlg-clone-path" title="' + esc(clone.path) + '">' + esc(homePath) + '</span>';
   html += '<span class="dlg-clone-branch">(' + esc(clone.currentBranch) + ')</span>';
-
-  // Badges
   if (clone.onPRBranch) {
     html += '<span class="dlg-badge dlg-badge-branch">on branch</span>';
   }
@@ -178,27 +208,33 @@ function renderCloneRow(clone, branch) {
     html += '<span class="dlg-badge dlg-badge-behind">behind</span>';
   }
 
-  // Action buttons
-  html += '<span class="dlg-actions">';
+  // Action buttons row
+  html += '<div class="dlg-actions" style="width:100%;margin-top:4px">';
+  var usable = true;
   if (clone.onPRBranch) {
     if (clone.dirty && clone.behindOrigin) {
-      html += '<span style="color:#f85149;font-size:10px"> We cannot use this checkout. Resolve conflicts manually!</span>';
+      html += '<span style="color:#f85149;font-size:10px">dirty + behind origin \u2014 resolve manually</span>';
+      usable = false;
     } else if (clone.behindOrigin) {
       html += '<button class="dlg-btn dlg-btn-primary" data-action="pull" data-clone="' + esc(clone.path) + '">Pull &amp; chat</button>';
-      html += '<button class="dlg-btn" data-action="chat-here" data-clone="' + esc(clone.path) + '">Chat as-is</button>';
+      html += '<button class="dlg-btn dlg-btn-primary" data-action="chat-here" data-clone="' + esc(clone.path) + '">Chat as-is</button>';
     } else {
-      html += '<button class="dlg-btn dlg-btn-primary" data-action="chat-here" data-clone="' + esc(clone.path) + '">Chat</button>';
+      html += '<button class="dlg-btn dlg-btn-primary" data-action="chat-here" data-clone="' + esc(clone.path) + '">Chat in terminal</button>';
     }
   } else if (!clone.dirty) {
     html += '<button class="dlg-btn dlg-btn-primary" data-action="checkout" data-clone="' + esc(clone.path) + '">Checkout &amp; chat</button>';
   } else {
     html += '<span style="color:#d29922;font-size:10px">dirty \u2014 commit or stash first</span>';
+    usable = false;
   }
-  html += '</span>';
+  // IDE buttons for usable clones
+  if (usable) {
+    html += ideButtons(clone.path);
+  }
+  html += '</div>';
 
   html += '</li>';
 
-  // Show dirty files as expandable detail
   if (clone.dirty) {
     html += '<div class="dlg-dirty-files">' + esc(clone.changedFiles.join('\n')) + '</div>';
   }
