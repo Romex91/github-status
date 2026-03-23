@@ -191,13 +191,33 @@ async function fetchPRSummary(repo, number, signal) {
 }
 
 async function fetchPRPromptData(repo, number, signal) {
-  const [diffRaw, reviewCommentsRaw] = await Promise.all([
+  const [owner, name] = repo.split('/');
+  const threadsQuery = `{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){pullRequest(number:${number}){reviewThreads(first:100){nodes{isOutdated,comments(first:100){nodes{databaseId,path,createdAt,body,author{login},replyTo{databaseId},line,originalLine,diffHunk}}}}}}}`;
+  const [diffRaw, threadsRaw] = await Promise.all([
     gh('pr', 'diff', String(number), '--repo', repo, signal),
-    gh('api', `repos/${repo}/pulls/${number}/comments`, '--paginate', signal),
+    gh('api', 'graphql', '-f', `query=${threadsQuery}`, signal),
   ]);
+  const threads = JSON.parse(threadsRaw).data.repository.pullRequest.reviewThreads.nodes;
+  const reviewComments = [];
+  for (const thread of threads) {
+    for (const c of thread.comments.nodes) {
+      const isRoot = !c.replyTo;
+      reviewComments.push({
+        id: c.databaseId,
+        path: c.path,
+        created_at: c.createdAt,
+        body: c.body,
+        user: { login: c.author?.login },
+        in_reply_to_id: c.replyTo?.databaseId || null,
+        isOutdated: thread.isOutdated,
+        line: isRoot ? (c.line || c.originalLine) : null,
+        diffHunk: isRoot ? c.diffHunk : null,
+      });
+    }
+  }
   return {
     diff: diffRaw.length > 20000 ? diffRaw.slice(0, 20000) + '\n... (truncated)' : diffRaw,
-    reviewComments: JSON.parse(reviewCommentsRaw),
+    reviewComments,
   };
 }
 
@@ -215,7 +235,7 @@ function buildContextForItem(item) {
 
 function buildTimeline(d) {
   const entries = [];
-  const botLogins = new Set(['coderabbitai', 'shortcut-integration', 'popmenu-bot', 'cursor']);
+  const botLogins = new Set();
 
   // Issue-level comments
   for (const c of (d.comments || [])) {
@@ -244,10 +264,12 @@ function buildTimeline(d) {
     entries.push({
       timestamp: rc.created_at,
       author: rc.user?.login,
-      type: 'review-comment',
+      type: rc.isOutdated ? 'review-comment:outdated' : 'review-comment',
       threadId: rc.in_reply_to_id ? String(rc.in_reply_to_id) : null,
       id: String(rc.id),
       path: rc.path,
+      line: rc.line,
+      diffHunk: rc.diffHunk,
       body: rc.body || '',
     });
   }
@@ -261,10 +283,12 @@ function buildTimeline(d) {
       const ts = e.timestamp ? new Date(e.timestamp).toISOString().replace('T', ' ').slice(0, 16) : '?';
       const thread = e.threadId ? ` [reply-to:${e.threadId}]` : '';
       const id = e.id ? ` [id:${e.id}]` : '';
-      const path = e.path ? ` [${e.path}]` : '';
+      const lineSuffix = e.line ? `:${e.line}` : '';
+      const path = e.path ? ` [${e.path}${lineSuffix}]` : '';
       const prefix = `[${ts}] @${e.author} [${e.type}]${id}${thread}${path}`;
+      const diffContext = e.diffHunk ? `\n    \`\`\` diff ${e.path}:${e.line}\n    ${e.diffHunk.split('\n').slice(-5).join('\n    ')}\n    \`\`\`` : '';
       const body = e.body.slice(0, 300).replace(/\n/g, '\n  ');
-      return `${prefix}\n  ${body}`;
+      return `${prefix}${diffContext}\n  ${body}`;
     });
 }
 
@@ -340,7 +364,6 @@ function buildContextForIssue(issue) {
   const d = issue.details || {};
 
   const comments = (d.comments || [])
-    .filter(c => c.author?.login !== 'coderabbitai')
     .map(c => `@${c.author?.login}:\n  ${(c.body || '').slice(0, 300).replace(/\n/g, '\n  ')}`);
 
   const assignees = (d.assignees || []).map(a => a.login);
