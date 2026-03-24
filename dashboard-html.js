@@ -25,6 +25,7 @@ export const INDEX_HTML = `<!DOCTYPE html>
     </style>
 </head>
 <body>
+    <script>(function(){var o=console.error;function banner(){if(document.body&&!document.getElementById('_err')){var d=document.createElement('div');d.id='_err';d.style.cssText='background:#3d1f1f;color:#f85149;padding:6px 12px;font-size:12px;font-family:monospace;position:sticky;top:0;z-index:999;border-bottom:1px solid #f85149';d.textContent='There are errors in dev console';document.body.prepend(d)}}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
     <h1>GitHub Status</h1>
     <div id="logs"></div>
     <script>
@@ -40,21 +41,10 @@ export const INDEX_HTML = `<!DOCTYPE html>
             window.scrollTo(0, document.body.scrollHeight);
         }
 
-        var _errorBanner = null;
-        function showError(err) {
-            console.error(err);
-            if (!_errorBanner) {
-                _errorBanner = document.createElement('div');
-                _errorBanner.style.cssText = 'background:#3d1f1f;color:#f85149;padding:6px 12px;font-size:12px;font-family:inherit;position:sticky;top:0;z-index:999;border-bottom:1px solid #f85149;';
-                _errorBanner.textContent = 'There are errors in dev console';
-                document.body.prepend(_errorBanner);
-            }
-        }
-
         function onSSE(source, event, handler) {
             source.addEventListener(event, function(e) {
                 var d = JSON.parse(e.data);
-                if (d.error) { showError(d.error); return; }
+                if (d.error) { console.error(d.error); return; }
                 handler(d);
             });
         }
@@ -72,7 +62,7 @@ export const INDEX_HTML = `<!DOCTYPE html>
         es.onerror = function() {
             if (es.readyState === EventSource.CLOSED) return;
             es.close();
-            showError('Status stream connection lost');
+            console.error('Status stream connection lost');
         };
 
         addLog('Connecting...', 'info');
@@ -219,14 +209,15 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
         .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
         .status-text { white-space: pre-wrap; }
         .status-text.loading { color: #d29922; }
-        .copy-prompt { cursor: pointer; color: #484f58; font-size: 10px; position: relative; }
-        .copy-prompt:hover { color: #58a6ff; }
-        .action-btn { cursor: pointer; color: #484f58; font-size: 10px; margin-left: 8px; }
-        .action-btn:hover { color: #58a6ff; }
-        .action-btn-accent { color: #58a6ff; }
-        .action-btn-accent:hover { color: #79c0ff; }
-        .inline-action { cursor: pointer; color: #3fb950; font-size: 10px; margin-right: 8px; }
-        .inline-action:hover { color: #56d364; }
+        .copy-prompt { cursor: pointer; color: #8b949e; font-size: 10px; position: relative; background: #21262d; border: 1px solid #30363d; border-radius: 3px; padding: 2px 8px; margin-left: 6px; font-family: inherit; display: inline-block; }
+        .copy-prompt:hover { color: #c9d1d9; border-color: #8b949e; }
+        .action-btn { cursor: pointer; color: #8b949e; font-size: 10px; margin-left: 6px; background: #21262d; border: 1px solid #30363d; border-radius: 3px; padding: 2px 8px; font-family: inherit; display: inline-block; }
+        .action-btn:hover { color: #c9d1d9; border-color: #8b949e; }
+        .action-btn-accent { color: #58a6ff; border-color: #58a6ff; }
+        .action-btn-accent:hover { color: #79c0ff; border-color: #79c0ff; background: #1a2233; }
+        .inline-action { cursor: pointer; color: #3fb950; font-size: 10px; margin-right: 6px; background: #1a2b1a; border: 1px solid #3fb950; border-radius: 3px; padding: 2px 8px; font-family: inherit; display: inline-block; }
+        .inline-action:hover { color: #56d364; border-color: #56d364; background: #223d22; }
+        .clone-badge { font-size: 10px; color: #3fb950; border: 1px solid #3fb950; border-radius: 3px; padding: 1px 5px; margin-left: 6px; display: inline-block; }
         .prompt-tooltip { display: none; position: absolute; left: 0; top: 100%; background: #161b22; border: 1px solid #30363d; border-radius: 4px; padding: 6px 8px; color: #8b949e; font-size: 11px; white-space: pre-wrap; width: max-content; max-width: 600px; max-height: 80vh; overflow-y: auto; z-index: 10; margin-top: 4px; }
         .copy-prompt:hover .prompt-tooltip { display: block; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
@@ -252,6 +243,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
     </style>
 </head>
 <body>
+    <script>(function(){var o=console.error;function banner(){if(document.body&&!document.getElementById('_err')){var d=document.createElement('div');d.id='_err';d.style.cssText='background:#3d1f1f;color:#f85149;padding:6px 12px;font-size:12px;font-family:monospace;position:sticky;top:0;z-index:999;border-bottom:1px solid #f85149';d.textContent='There are errors in dev console';document.body.prepend(d)}}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
     ${updateHtml}
     <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
     <div class="fold-controls"><a onclick="foldAll()">Fold all</a><a onclick="unfoldAll()">Unfold all</a></div>
@@ -378,19 +370,6 @@ ${createdIssueRows}
             document.querySelectorAll('h2').forEach(function(h) { h.classList.remove('folded'); });
         }
 
-        var _errorBanner = null;
-        function showError(err) {
-            console.error(err);
-            if (!_errorBanner) {
-                _errorBanner = document.createElement('div');
-                _errorBanner.style.cssText = 'background:#3d1f1f;color:#f85149;padding:6px 12px;font-size:12px;font-family:inherit;position:sticky;top:0;z-index:999;border-bottom:1px solid #f85149;';
-                _errorBanner.textContent = 'There are errors in dev console';
-                document.body.prepend(_errorBanner);
-            }
-        }
-        window.addEventListener('unhandledrejection', function(e) { showError(e.reason); });
-        window.onerror = function(msg, src, line, col, err) { showError(err || msg); };
-
         var _clonePaths = {};
         function inlineChat(index) {
             fetch('/api/chat', {
@@ -456,7 +435,7 @@ ${createdIssueRows}
         function onSSE(source, event, handler) {
             source.addEventListener(event, function(e) {
                 var d = JSON.parse(e.data);
-                if (d.error) { showError(d.error); return; }
+                if (d.error) { console.error(d.error); return; }
                 handler(d);
             });
         }
@@ -479,14 +458,17 @@ ${createdIssueRows}
                     if (c.onPRBranch && !c.behindOrigin && !c.dirty) { match = c.path; break; }
                 }
                 if (!match) return;
+                _clonePaths[idx] = match;
                 var inlineEl = document.getElementById('inline-actions-' + idx);
                 if (!inlineEl) return;
-                _clonePaths[idx] = match;
-                var h = '<span class="inline-action" onclick="inlineChat(' + idx + ')">chat</span>';
+                var parts = match.split('/');
+                var homePath = (parts[1] === 'home' || parts[1] === 'Users') ? '~/' + parts.slice(3).join('/') : match;
+                var h = '<span class="clone-badge">' + homePath + '</span>';
+                h += '<span class="inline-action" onclick="inlineChat(' + idx + ')">chat</span>';
                 var ides = (typeof INSTALLED_IDES !== 'undefined') ? INSTALLED_IDES : [];
                 for (var k = 0; k < ides.length; k++) {
-                    var cmd = ides[k].cmd.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-                    h += '<span class="inline-action" onclick="inlineIDE(&quot;' + cmd + '&quot;,' + idx + ')">' + ides[k].name.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>';
+                    var cmd = ides[k].cmd.replaceAll('&','&amp;').replaceAll('"','&quot;');
+                    h += '<span class="inline-action" onclick="inlineIDE(&quot;' + cmd + '&quot;,' + idx + ')">' + ides[k].name.replaceAll('&','&amp;').replaceAll('<','&lt;') + '</span>';
                 }
                 inlineEl.innerHTML = h;
             }).finally(function() {
@@ -519,10 +501,10 @@ ${createdIssueRows}
             if (branchCell) {
                 branchCell.classList.remove('status-loading');
                 var branch = d.branch;
-                var html = '<span class="branch-name" onclick="copyBranch(this)" title="Click to copy">' + branch.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>';
+                var html = '<span class="branch-name" onclick="copyBranch(this)" title="Click to copy">' + branch.replaceAll('&','&amp;').replaceAll('<','&lt;') + '</span>';
                 if (branch) {
                     var cmd = 'cd ~/' + d.repoShort + ' && git fetch origin ' + branch + ' && git checkout ' + branch;
-                    html += '<br><span class="checkout-cmd" onclick="copyCmd(this)" data-cmd="' + cmd.replace(/"/g,'&quot;') + '">copy git checkout cmd</span>';
+                    html += '<br><span class="checkout-cmd" onclick="copyCmd(this)" data-cmd="' + cmd.replaceAll('"','&quot;') + '">copy git checkout cmd</span>';
                 }
                 branchCell.innerHTML = html;
             }
@@ -531,9 +513,9 @@ ${createdIssueRows}
                 ciCell.classList.remove('status-loading');
                 if (d.failing && d.failing.length) {
                     ciCell.innerHTML = d.failing.map(function(c) {
-                        var name = (c.name || c.context || 'ci').replace(/^ci\\/circleci:\\s*/i, '').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+                        var name = (c.name || c.context || 'ci').replace(/^ci\\/circleci:\\s*/i, '').replaceAll('&','&amp;').replaceAll('<','&lt;');
                         var url = c.detailsUrl || c.targetUrl || '';
-                        return url ? '<a class="ci-link" href="' + url.replace(/"/g,'&quot;') + '">' + name + '</a>' : '<span class="ci-link">' + name + '</span>';
+                        return url ? '<a class="ci-link" href="' + url.replaceAll('"','&quot;') + '">' + name + '</a>' : '<span class="ci-link">' + name + '</span>';
                     }).join('<br>');
                 } else {
                     ciCell.textContent = '';
@@ -568,7 +550,7 @@ ${createdIssueRows}
         es.onerror = function() {
             if (es.readyState === EventSource.CLOSED) return;
             es.close();
-            showError('AI stream connection lost');
+            console.error('AI stream connection lost');
         };
 
         document.querySelectorAll('.status-text').forEach(function(el) {
