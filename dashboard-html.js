@@ -250,7 +250,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
 
     <h1 class="section-heading">Pull Requests</h1>
 
-    <h2 onclick="this.classList.toggle('folded')">My Open PRs (${myPRs.length})</h2>
+    <h2 onclick="toggleFold(this)">My Open PRs (${myPRs.length})</h2>
     <table>
         <thead>
             <tr>
@@ -268,7 +268,7 @@ ${myRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="this.classList.toggle('folded')">PRs Waiting for My Review (${reviewPRs.length})</h2>
+    <h2 onclick="toggleFold(this)">PRs Waiting for My Review (${reviewPRs.length})</h2>
     <table>
         <thead>
             <tr>
@@ -286,7 +286,7 @@ ${reviewRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="this.classList.toggle('folded')">PRs I Was Mentioned In (${mentionedPRs.length})</h2>
+    <h2 onclick="toggleFold(this)">PRs I Was Mentioned In (${mentionedPRs.length})</h2>
     <table>
         <thead>
             <tr>
@@ -306,7 +306,7 @@ ${mentionedRows}
 
     <h1 class="section-heading">Issues</h1>
 
-    <h2 onclick="this.classList.toggle('folded')">Issues Assigned to Me (${assignedIssues.length})</h2>
+    <h2 onclick="toggleFold(this)">Issues Assigned to Me (${assignedIssues.length})</h2>
     <table>
         <thead>
             <tr>
@@ -324,7 +324,7 @@ ${assignedIssueRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="this.classList.toggle('folded')">Issues I Was Mentioned In (${mentionedIssues.length})</h2>
+    <h2 onclick="toggleFold(this)">Issues I Was Mentioned In (${mentionedIssues.length})</h2>
     <table>
         <thead>
             <tr>
@@ -342,7 +342,7 @@ ${mentionedIssueRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="this.classList.toggle('folded')">Issues I Created (${createdIssues.length})</h2>
+    <h2 onclick="toggleFold(this)">Issues I Created (${createdIssues.length})</h2>
     <table>
         <thead>
             <tr>
@@ -363,12 +363,32 @@ ${createdIssueRows}
     <p class="footer">Generated ${date}</p>
 
     <script>
+        function saveFoldState() {
+            var state = [];
+            document.querySelectorAll('h2').forEach(function(h) { state.push(h.classList.contains('folded')); });
+            localStorage.setItem('foldState', JSON.stringify(state));
+        }
+        function restoreFoldState() {
+            var raw = localStorage.getItem('foldState');
+            if (!raw) return;
+            var state = JSON.parse(raw);
+            document.querySelectorAll('h2').forEach(function(h, i) {
+                if (state[i]) h.classList.add('folded');
+            });
+        }
+        function toggleFold(el) {
+            el.classList.toggle('folded');
+            saveFoldState();
+        }
         function foldAll() {
             document.querySelectorAll('h2').forEach(function(h) { h.classList.add('folded'); });
+            saveFoldState();
         }
         function unfoldAll() {
             document.querySelectorAll('h2').forEach(function(h) { h.classList.remove('folded'); });
+            saveFoldState();
         }
+        restoreFoldState();
 
         var _clonePaths = {};
         function inlineChat(index) {
