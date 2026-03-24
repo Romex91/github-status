@@ -209,15 +209,15 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
         .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
         .status-text { white-space: pre-wrap; }
         .status-text.loading { color: #d29922; }
-        .copy-prompt { cursor: pointer; color: #8b949e; font-size: 10px; position: relative; background: #21262d; border: 1px solid #30363d; border-radius: 3px; padding: 2px 8px; margin-left: 6px; font-family: inherit; display: inline-block; }
+        .copy-prompt { cursor: pointer; color: #8b949e; font-size: 10px; position: relative; padding: 2px 8px; margin-right: 6px; font-family: inherit; display: inline-block; }
         .copy-prompt:hover { color: #c9d1d9; border-color: #8b949e; }
-        .action-btn { cursor: pointer; color: #8b949e; font-size: 10px; margin-left: 6px; background: #21262d; border: 1px solid #30363d; border-radius: 3px; padding: 2px 8px; font-family: inherit; display: inline-block; }
+        .action-btn { cursor: pointer; color: #8b949e; font-size: 10px; margin-right: 6px; background: #21262d; border: 1px solid #30363d; border-radius: 3px; padding: 2px 8px; font-family: inherit; display: inline-block; }
         .action-btn:hover { color: #c9d1d9; border-color: #8b949e; }
         .action-btn-accent { color: #58a6ff; border-color: #58a6ff; }
         .action-btn-accent:hover { color: #79c0ff; border-color: #79c0ff; background: #1a2233; }
         .inline-action { cursor: pointer; color: #3fb950; font-size: 10px; margin-right: 6px; background: #1a2b1a; border: 1px solid #3fb950; border-radius: 3px; padding: 2px 8px; font-family: inherit; display: inline-block; }
         .inline-action:hover { color: #56d364; border-color: #56d364; background: #223d22; }
-        .clone-badge { font-size: 10px; color: #3fb950; border: 1px solid #3fb950; border-radius: 3px; padding: 1px 5px; margin-left: 6px; display: inline-block; }
+        .clone-badge { font-size: 10px; color: #3fb950; padding: 1px 5px; margin-right: 6px; display: inline-block; }
         .prompt-tooltip { display: none; position: absolute; left: 0; top: 100%; background: #161b22; border: 1px solid #30363d; border-radius: 4px; padding: 6px 8px; color: #8b949e; font-size: 11px; white-space: pre-wrap; width: max-content; max-width: 600px; max-height: 80vh; overflow-y: auto; z-index: 10; margin-top: 4px; }
         .copy-prompt:hover .prompt-tooltip { display: block; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
