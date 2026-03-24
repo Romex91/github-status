@@ -54,35 +54,6 @@ function readRef(gitDir, ref) {
   return null;
 }
 
-/**
- * Read all refs under a directory (e.g. refs/heads/, refs/remotes/origin/).
- * Returns { branchName: sha } map. Also checks packed-refs.
- */
-function readAllRefs(gitDir, prefix) {
-  const refs = {};
-  const dir = join(gitDir, prefix);
-  if (existsSync(dir)) {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isFile()) {
-        const sha = readFileSync(join(dir, entry.name), 'utf8').trim();
-        if (/^[0-9a-f]{40}$/.test(sha)) refs[entry.name] = sha;
-      }
-    }
-  }
-
-  // Also check packed-refs for this prefix
-  const packedPath = join(gitDir, 'packed-refs');
-  if (existsSync(packedPath)) {
-    const packed = readFileSync(packedPath, 'utf8');
-    const re = new RegExp(`^([0-9a-f]{40})\\s+${prefix}(.+)$`, 'gm');
-    let m;
-    while ((m = re.exec(packed)) !== null) {
-      if (!refs[m[2]]) refs[m[2]] = m[1]; // loose refs take priority
-    }
-  }
-
-  return refs;
-}
 
 /**
  * Scan all git repos in ~ (depth 2) once. For each clone, read origin repo,
@@ -122,15 +93,13 @@ export async function buildCloneIndex() {
     if (!remoteRepo) continue;
 
     const currentBranch = readCurrentBranch(gitDir);
-    const localRefs = readAllRefs(gitDir, 'refs/heads/');
-    const remoteRefs = readAllRefs(gitDir, 'refs/remotes/origin/');
     const status = await runCmd('git', ['status', '--porcelain'], { cwd: dir });
     const dirty = !!status;
     const changedFiles = status ? status.split('\n') : [];
 
     const key = remoteRepo.toLowerCase();
     if (!index.has(key)) index.set(key, []);
-    index.get(key).push({ path: dir, currentBranch, dirty, changedFiles, localRefs, remoteRefs });
+    index.get(key).push({ path: dir, currentBranch, dirty, changedFiles });
   }
 
   console.log(`Clone index: ${gitDirs.length} repos scanned, ${index.size} unique remotes`);
@@ -146,9 +115,10 @@ export function scanForClones(repo, branch, headSha, index) {
   const matches = index.get(repo.toLowerCase()) || [];
 
   const clones = matches.map(clone => {
+    const gitDir = join(clone.path, '.git');
     const onPRBranch = branch ? clone.currentBranch === branch : false;
-    const localHead = branch ? (clone.localRefs[branch] || null) : null;
-    const remoteHead = branch ? (headSha || clone.remoteRefs[branch] || null) : null;
+    const localHead = branch ? readRef(gitDir, `refs/heads/${branch}`) : null;
+    const remoteHead = branch ? (headSha || readRef(gitDir, `refs/remotes/origin/${branch}`)) : null;
     const hasBranchLocally = !!localHead;
     const behindOrigin = !!(localHead && remoteHead && localHead !== remoteHead);
 
