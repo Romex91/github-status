@@ -88,7 +88,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
     }
     return `<td class="status-col" id="status-${globalIndex}">
                     <span class="status-text">waiting...</span>
-                    <br><span id="inline-actions-${globalIndex}"></span><span class="action-btn action-btn-accent" onclick="showRepoSelectionDialog(${globalIndex})">pick git clone</span><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
+                    <br><span id="inline-actions-${globalIndex}"></span>${item.isIssue ? '' : `<span class="action-btn action-btn-accent" onclick="showRepoSelectionDialog(${globalIndex})">pick git clone</span>`}<span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
   }
