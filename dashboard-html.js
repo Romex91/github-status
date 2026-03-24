@@ -131,9 +131,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
   }
 
   let updateHtml = '';
-  if (updateInfo && updateInfo.error) {
-    updateHtml = `<div style="background:#3d1f1f;border:1px solid #f85149;border-radius:6px;padding:8px 12px;margin:8px 0;color:#f85149;font-size:13px">Version check failed: ${escapeHtml(updateInfo.error)}</div>`;
-  } else if (updateInfo) {
+  if (updateInfo) {
     const commitItems = updateInfo.commits.map(c => {
       const lines = c.split('\n');
       const title = lines[0];
@@ -255,7 +253,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
 </head>
 <body>
     ${updateHtml}
-    <h1>GitHub Status - ${date}${updateInfo && !updateInfo.error ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
+    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
     <div class="fold-controls"><a onclick="foldAll()">Fold all</a><a onclick="unfoldAll()">Unfold all</a></div>
 
     <h1 class="section-heading">Pull Requests</h1>

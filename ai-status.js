@@ -356,7 +356,6 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
         }),
       ]);
     } catch (e) {
-      inner.catch(() => {}); // swallow late rejection from orphaned inner promise
       aborted.add(index); // prevent zombie runOneInner from sending events
       const phase = itemPhase[index] || 'unknown phase';
       if (e.name === 'AbortError' || ac.signal.aborted) e = new Error(`Timeout after ${RUN_ONE_TIMEOUT / 1000}s while ${phase}`);
@@ -379,7 +378,7 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
     while (waiting.length > 0 && running.size < CONCURRENCY && !closed) {
       const idx = waiting.shift();
       const p = runOne(idx)
-        .catch(e => console.error(`Unexpected runOne error for ${idx}:`, e))
+        .catch(e => send('ai-error', { index: idx, error: e.stack || e.message }))
         .finally(() => { running.delete(p); drain(); });
       running.add(p);
     }

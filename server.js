@@ -14,14 +14,17 @@ import { detectIDEs } from './ide-detect.js';
 const PROJECT_DIR = new URL('.', import.meta.url).pathname;
 const PORT = process.env.PORT || 7777;
 
+// Global safety net: log unhandled rejections instead of crashing
+process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
+
 const installedIDEs = await detectIDEs();
 console.log(`Detected IDEs: ${installedIDEs.map(i => i.name).join(', ') || 'none'}`);
 
 // Capture tool versions at startup for error diagnostics
 let ghVersion = 'unknown';
 let claudeVersion = 'unknown';
-runCmd('gh', ['--version']).then(v => { ghVersion = v.match(/\d+\.\d+\.\d+/)?.[0] || v.trim(); }).catch(() => {});
-runCmd('claude', ['--version']).then(v => { claudeVersion = v.trim(); }).catch(() => {});
+runCmd('gh', ['--version']).then(v => { ghVersion = v.match(/\d+\.\d+\.\d+/)?.[0] || v.trim(); });
+runCmd('claude', ['--version']).then(v => { claudeVersion = v.trim(); });
 
 // Store PR data between phases
 let pendingPRData = null;
@@ -92,13 +95,9 @@ async function handleStatusStream(req, res) {
       fetchAssignedIssues(log),
       fetchMentionedIssues(log),
       fetchCreatedIssues(log),
-      checkForUpdates().catch(e => ({ error: e.message })),
+      checkForUpdates(),
     ]);
     ghUsername = username;
-
-    if (updateInfo && updateInfo.error) {
-      log(`Version check failed: ${updateInfo.error}`, 'error');
-    }
 
     // Deduplicate: remove mentioned PRs already in my PRs or review PRs
     const existingUrls = new Set([...myPRs, ...reviewPRs].map(pr => pr.html_url));

@@ -6,7 +6,7 @@ export const AI_CACHE_DIR = new URL('./data/ai-cache/', import.meta.url).pathnam
 mkdirSync(AI_CACHE_DIR, { recursive: true });
 
 export function readCacheEntry(key) {
-  if (CHAOS && Math.random() < 0.2) { console.error(`[CHAOS] cache read failure for ${key}`); return null; }
+  if (CHAOS && Math.random() < 0.2) throw new Error(`[CHAOS] cache read failure for ${key}`);
   const path = `${AI_CACHE_DIR}${key}.json`;
   if (!existsSync(path)) return null;
   return JSON.parse(readFileSync(path, 'utf8'));
