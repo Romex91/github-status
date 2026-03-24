@@ -59,7 +59,7 @@ function readRef(gitDir, ref) {
  * Probe a single clone directory for branch, dirty, and behind-origin state.
  * Reads git internals directly where possible; only spawns git for dirty check.
  */
-function probeClone(dir, branch) {
+function probeClone(dir, branch, headSha) {
   const gitDir = join(dir, '.git');
   const result = {
     path: dir,
@@ -79,7 +79,7 @@ function probeClone(dir, branch) {
   if (branch) {
     result.onPRBranch = result.currentBranch === branch;
     result.localHead = readRef(gitDir, `refs/heads/${branch}`);
-    result.remoteHead = readRef(gitDir, `refs/remotes/origin/${branch}`);
+    result.remoteHead = headSha || readRef(gitDir, `refs/remotes/origin/${branch}`);
     result.hasBranchLocally = !!result.localHead;
     result.behindOrigin = !!(result.localHead && result.remoteHead && result.localHead !== result.remoteHead);
   }
@@ -104,7 +104,7 @@ function probeClone(dir, branch) {
  * @param {string|null} branch - PR branch name (null for issues)
  * @returns {Promise<{clones: object[], repo: string, branch: string|null, suggestedClonePath: string}>}
  */
-export async function scanForClones(repo, branch) {
+export async function scanForClones(repo, branch, headSha) {
   const home = homedir();
   let entries;
   try {
@@ -142,7 +142,7 @@ export async function scanForClones(repo, branch) {
     if (!originUrl) continue;
     const remoteRepo = extractRepoFromRemote(originUrl);
     if (!remoteRepo || remoteRepo.toLowerCase() !== repoLower) continue;
-    clones.push(probeClone(dir, branch));
+    clones.push(probeClone(dir, branch, headSha));
   }
 
   // Sort: on PR branch first, then clean, then dirty

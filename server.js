@@ -194,7 +194,7 @@ async function fetchIssueDetails(repo, number, signal) {
 
 async function fetchPRSummary(repo, number, signal) {
   const raw = await gh('pr', 'view', String(number), '--repo', repo,
-    '--json', 'reviewDecision,statusCheckRollup,comments,reviews,reviewRequests,latestReviews,updatedAt,isDraft,mergeable,labels,body,headRefName', signal);
+    '--json', 'reviewDecision,statusCheckRollup,comments,reviews,reviewRequests,latestReviews,updatedAt,isDraft,mergeable,labels,body,headRefName,headRefOid', signal);
   return JSON.parse(raw);
 }
 
@@ -1413,7 +1413,8 @@ const server = http.createServer((req, res) => {
 
         const scanResult = await scanForClones(
           pr.repo,
-          pr.isIssue ? null : (pr.details?.headRefName || null)
+          pr.isIssue ? null : (pr.details?.headRefName || null),
+          pr.isIssue ? null : (pr.details?.headRefOid || null)
         );
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
