@@ -1,0 +1,64 @@
+import { spawn } from 'node:child_process';
+
+// Emperor protects! :pray:
+export const CHAOS = false;
+
+export const CMD_TIMEOUT = 60000;
+
+export function runCmd(bin, args, { stdin, env: cmdEnv, signal } = {}) {
+  const cmd = `${bin} ${args.join(' ')}`;
+  let shellBin = bin, shellArgs = args;
+  if (CHAOS) {
+    const escaped = args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+    shellBin = 'sh';
+    shellArgs = ['-c', `./bin/chaotic-testing && ${bin} ${escaped}`];
+  }
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new Error(`Aborted before start: ${cmd}`)); return; }
+    const child = spawn(shellBin, shellArgs, { env: cmdEnv, stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+    const kill = () => { child.kill('SIGTERM'); setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 2000); };
+    const timer = setTimeout(kill, CMD_TIMEOUT);
+    const onAbort = () => { kill(); };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (stdin) { child.stdin.write(stdin); child.stdin.end(); }
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (c) => { stdout += c; });
+    child.stderr.on('data', (c) => { stderr += c; });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      if (signal?.aborted) reject(new Error(`Aborted: ${cmd}`));
+      else if (code === 0 && stdout.trim()) resolve(stdout.trim());
+      else reject(new Error(code === null ? `Command timed out after ${CMD_TIMEOUT / 1000}s: ${cmd}` : `Command failed: ${cmd}\n${stderr || `Exit code ${code}`}`));
+    });
+    child.on('error', (err) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); reject(new Error(`Command failed: ${cmd}\n${err.message}`)); });
+  });
+}
+
+export async function gh(...args) {
+  const signal = args.length && args[args.length - 1] instanceof AbortSignal ? args.pop() : undefined;
+  return runCmd('gh', args, { signal });
+}
+
+export function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+export function daysSince(dateStr) {
+  const now = new Date();
+  const then = new Date(dateStr);
+  return Math.floor((now - then) / (1000 * 60 * 60 * 24));
+}
+
+export function daysClass(days) {
+  if (days <= 3) return 'good';
+  if (days <= 14) return 'warning';
+  return 'bad';
+}
+
+export function todayStr() {
+  const d = new Date();
+  const offset = d.getTimezoneOffset();
+  d.setMinutes(d.getMinutes() - offset);
+  return d.toISOString().slice(0, 16).replace('T', ' ');
+}
