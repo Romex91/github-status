@@ -54,12 +54,14 @@ function createDialog() {
   document.body.appendChild(overlay);
   document.body.appendChild(modal);
 
+  var reloadNeeded = false;
   function close() {
     overlay.remove();
     modal.remove();
+    if (reloadNeeded) location.reload();
   }
   overlay.onclick = close;
-  return { modal: modal, close: close };
+  return { modal: modal, close: close, markReload: function () { reloadNeeded = true; } };
 }
 
 // ─── Repo selection dialog ──────────────────────────────────────────────
@@ -72,7 +74,7 @@ function showRepoSelectionDialog(index) {
   fetch('/api/repo-scan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ index: index })
+    body: JSON.stringify({ index: index, rescan: true })
   })
     .then(function (r) { return r.json(); })
     .then(function (data) {
@@ -156,12 +158,18 @@ function renderRepoSelectionDialog(dlg, data, index) {
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d.error) throw new Error(d.error);
-          btn.remove();
-          // Enable sibling action/IDE buttons in this row
-          row.querySelectorAll('[data-action][disabled], [data-ide][disabled]').forEach(function (b) {
-            b.disabled = false;
-            b.classList.add('dlg-btn-primary');
-          });
+          dlg.markReload();
+          // Re-scan and re-render dialog with fresh state
+          return fetch('/api/repo-scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ index: index })
+          }).then(function (r) { return r.json(); });
+        })
+        .then(function (freshData) {
+          if (freshData && !freshData.error) {
+            renderRepoSelectionDialog(dlg, freshData, index);
+          }
         });
     };
   });

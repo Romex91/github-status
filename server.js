@@ -212,9 +212,11 @@ const server = http.createServer((req, res) => {
     });
   } else if (req.url === '/api/repo-scan' && req.method === 'POST') {
     handlePost(req, res, async (data) => {
-      const { index } = data;
+      const { index, rescan } = data;
       const pr = pendingPRData && pendingPRData[index];
       if (!pr) { res.writeHead(404); res.end(JSON.stringify({ error: 'Item not found. Reload the page.' })); return; }
+
+      if (rescan) cloneIndex = await buildCloneIndex();
 
       const scanResult = scanForClones(
         pr.repo,
@@ -245,6 +247,7 @@ const server = http.createServer((req, res) => {
       } else {
         res.writeHead(400); res.end(JSON.stringify({ error: `Unknown sync action: ${action}` })); return;
       }
+      cloneIndex = await buildCloneIndex();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end('{"ok":true}');
     });
