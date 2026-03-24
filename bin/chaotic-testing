@@ -2,13 +2,13 @@
 # Chaos testing: randomly fails or adds a long delay before the next command.
 # Used as a prefix: ./bin/chaotic-testing && gh pr view ...
 
-ROLL=$((RANDOM % 40))
+ROLL=$((RANDOM % 100))
 
 if [ $ROLL -lt 4 ]; then
   # 20% chance: fail immediately
   echo "[CHAOS] Random failure" >&2
   exit 1
-elif [ $ROLL -lt 8 ]; then
+elif [ $ROLL -lt 0 ]; then
   # 20% chance: sleep up to 120 seconds (will likely hit timeout)
   DELAY=$((RANDOM % 120 + 1))
   echo "[CHAOS] Sleeping ${DELAY}s" >&2

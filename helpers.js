@@ -7,6 +7,7 @@ export const CMD_TIMEOUT = 60000;
 
 export function runCmd(bin, args, { stdin, env: cmdEnv, signal, cwd } = {}) {
   const cmd = `${bin} ${args.join(' ')}`;
+  console.log(`runCmd > ${cmd}`);
   let shellBin = bin, shellArgs = args;
   if (CHAOS) {
     const escaped = args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
