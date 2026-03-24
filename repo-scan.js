@@ -55,55 +55,43 @@ function readRef(gitDir, ref) {
 }
 
 /**
- * Probe a single clone directory for branch, dirty, and behind-origin state.
- * Reads git internals directly where possible; only spawns git for dirty check.
+ * Read all refs under a directory (e.g. refs/heads/, refs/remotes/origin/).
+ * Returns { branchName: sha } map. Also checks packed-refs.
  */
-async function probeClone(dir, branch, headSha) {
-  const gitDir = join(dir, '.git');
-  const result = {
-    path: dir,
-    currentBranch: null,
-    onPRBranch: false,
-    dirty: false,
-    changedFiles: [],
-    hasBranchLocally: false,
-    behindOrigin: false,
-    localHead: null,
-    remoteHead: null,
-  };
-
-  result.currentBranch = readCurrentBranch(gitDir);
-  if (!result.currentBranch) return result;
-
-  if (branch) {
-    result.onPRBranch = result.currentBranch === branch;
-    result.localHead = readRef(gitDir, `refs/heads/${branch}`);
-    result.remoteHead = headSha || readRef(gitDir, `refs/remotes/origin/${branch}`);
-    result.hasBranchLocally = !!result.localHead;
-    result.behindOrigin = !!(result.localHead && result.remoteHead && result.localHead !== result.remoteHead);
+function readAllRefs(gitDir, prefix) {
+  const refs = {};
+  const dir = join(gitDir, prefix);
+  if (existsSync(dir)) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isFile()) {
+        const sha = readFileSync(join(dir, entry.name), 'utf8').trim();
+        if (/^[0-9a-f]{40}$/.test(sha)) refs[entry.name] = sha;
+      }
+    }
   }
 
-  // Dirty check — needs git process (index comparison)
-  const status = await runCmd('git', ['status', '--porcelain'], { cwd: dir });
-  if (status) {
-    result.dirty = true;
-    result.changedFiles = status.split('\n');
+  // Also check packed-refs for this prefix
+  const packedPath = join(gitDir, 'packed-refs');
+  if (existsSync(packedPath)) {
+    const packed = readFileSync(packedPath, 'utf8');
+    const re = new RegExp(`^([0-9a-f]{40})\\s+${prefix}(.+)$`, 'gm');
+    let m;
+    while ((m = re.exec(packed)) !== null) {
+      if (!refs[m[2]]) refs[m[2]] = m[1]; // loose refs take priority
+    }
   }
 
-  return result;
+  return refs;
 }
 
 /**
- * Scan all git repos in ~ (depth 2) and find clones whose origin matches the given repo.
- * Returns sorted results: on PR branch first, then clean, then dirty.
- *
- * @param {string} repo - Full repo name (e.g. "org/repo")
- * @param {string|null} branch - PR branch name (null for issues)
- * @returns {Promise<{clones: object[], repo: string, branch: string|null, suggestedClonePath: string}>}
+ * Scan all git repos in ~ (depth 2) once. For each clone, read origin repo,
+ * current branch, local/remote refs, and dirty status.
+ * Returns a Map<repoNameLower, CloneInfo[]> for instant lookup.
  */
-export async function scanForClones(repo, branch, headSha) {
+export async function buildCloneIndex() {
   const home = homedir();
-  if (!existsSync(home)) return { clones: [], repo, branch, suggestedClonePath: '' };
+  if (!existsSync(home)) return new Map();
   const entries = readdirSync(home, { withFileTypes: true });
 
   const skipDirs = new Set(['Downloads', 'Documents', 'Desktop', 'Library', 'Music', 'Movies', 'Pictures', 'Public', 'Applications']);
@@ -124,16 +112,58 @@ export async function scanForClones(repo, branch, headSha) {
     }
   }
 
-  // Match by reading .git/config directly (no process spawn)
-  const repoLower = repo.toLowerCase();
-  const clones = [];
+  const index = new Map();
+
   for (const dir of gitDirs) {
-    const originUrl = readOriginUrl(join(dir, '.git'));
+    const gitDir = join(dir, '.git');
+    const originUrl = readOriginUrl(gitDir);
     if (!originUrl) continue;
     const remoteRepo = extractRepoFromRemote(originUrl);
-    if (!remoteRepo || remoteRepo.toLowerCase() !== repoLower) continue;
-    clones.push(await probeClone(dir, branch, headSha));
+    if (!remoteRepo) continue;
+
+    const currentBranch = readCurrentBranch(gitDir);
+    const localRefs = readAllRefs(gitDir, 'refs/heads/');
+    const remoteRefs = readAllRefs(gitDir, 'refs/remotes/origin/');
+    const status = await runCmd('git', ['status', '--porcelain'], { cwd: dir });
+    const dirty = !!status;
+    const changedFiles = status ? status.split('\n') : [];
+
+    const key = remoteRepo.toLowerCase();
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push({ path: dir, currentBranch, dirty, changedFiles, localRefs, remoteRefs });
   }
+
+  console.log(`Clone index: ${gitDirs.length} repos scanned, ${index.size} unique remotes`);
+  return index;
+}
+
+/**
+ * Look up clones for a repo from the pre-built index.
+ * Derives branch-specific fields (onPRBranch, behindOrigin, etc.) from stored refs.
+ */
+export function scanForClones(repo, branch, headSha, index) {
+  const home = homedir();
+  const matches = index.get(repo.toLowerCase()) || [];
+
+  const clones = matches.map(clone => {
+    const onPRBranch = branch ? clone.currentBranch === branch : false;
+    const localHead = branch ? (clone.localRefs[branch] || null) : null;
+    const remoteHead = branch ? (headSha || clone.remoteRefs[branch] || null) : null;
+    const hasBranchLocally = !!localHead;
+    const behindOrigin = !!(localHead && remoteHead && localHead !== remoteHead);
+
+    return {
+      path: clone.path,
+      currentBranch: clone.currentBranch,
+      onPRBranch,
+      dirty: clone.dirty,
+      changedFiles: clone.changedFiles,
+      hasBranchLocally,
+      behindOrigin,
+      localHead,
+      remoteHead,
+    };
+  });
 
   // Sort: on PR branch first, then clean, then dirty
   clones.sort((a, b) => {

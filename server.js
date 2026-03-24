@@ -8,7 +8,7 @@ import { fetchMyPRs, fetchReviewPRs, fetchMentionedPRs, fetchAssignedIssues, fet
 import { handleAIStream } from './ai-status.js';
 import { INDEX_HTML, buildDashboardHtml } from './dashboard-html.js';
 import { launchChat } from './launch-chat.js';
-import { scanForClones } from './repo-scan.js';
+import { buildCloneIndex, scanForClones } from './repo-scan.js';
 import { detectIDEs } from './ide-detect.js';
 
 const PROJECT_DIR = new URL('.', import.meta.url).pathname;
@@ -31,6 +31,7 @@ let pendingPRData = null;
 let ghUsername = null;
 let enqueueAIItems = null;
 let repoColorMap = loadRepoColors();
+let cloneIndex = null;
 
 // === Utilities ===
 
@@ -132,6 +133,10 @@ async function handleStatusStream(req, res) {
     const allItems = [...allPRs, ...allIssues];
     pendingPRData = allItems;
 
+    // Build clone index once for all repo-scan lookups
+    log('Scanning local git repos...', 'info');
+    cloneIndex = await buildCloneIndex();
+
     // Update persistent repo color assignments
     const allRepoNames = [...new Set(allItems.map(i => i.repo.split('/').pop()))];
     repoColorMap = updateRepoColors(allRepoNames);
@@ -211,10 +216,11 @@ const server = http.createServer((req, res) => {
       const pr = pendingPRData && pendingPRData[index];
       if (!pr) { res.writeHead(404); res.end(JSON.stringify({ error: 'Item not found. Reload the page.' })); return; }
 
-      const scanResult = await scanForClones(
+      const scanResult = scanForClones(
         pr.repo,
         pr.isIssue ? null : (pr.details?.headRefName || null),
-        pr.isIssue ? null : (pr.details?.headRefOid || null)
+        pr.isIssue ? null : (pr.details?.headRefOid || null),
+        cloneIndex || new Map()
       );
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
