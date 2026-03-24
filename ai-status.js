@@ -344,6 +344,7 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
     const ac = new AbortController();
     let timer;
     const inner = runOneInner(index, ac.signal);
+    // eslint-disable-next-line no-restricted-syntax -- top-level error handler: catches runCmd/timeout failures and sends ai-error SSE to FE
     try {
       await Promise.race([
         inner,

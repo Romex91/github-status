@@ -1,5 +1,5 @@
-import { readdirSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { readdirSync, existsSync } from 'node:fs';
+import { runCmd } from './helpers.js';
 
 const IDE_CANDIDATES = [
   { id: 'cursor',   name: 'Cursor',   cmd: 'cursor',   mac: 'Cursor.app' },
@@ -17,20 +17,18 @@ const IDE_CANDIDATES = [
 
 /**
  * Detect installed IDEs by checking CLI tools in PATH and macOS /Applications.
- * Runs once at startup — results are cached.
- * @returns {{ id: string, name: string, cmd: string }[]}
+ * @returns {Promise<{ id: string, name: string, cmd: string }[]>}
  */
-export function detectIDEs() {
+export async function detectIDEs() {
   const macApps = new Set();
-  if (process.platform === 'darwin') {
-    try { for (const e of readdirSync('/Applications')) macApps.add(e); } catch {}
+  if (process.platform === 'darwin' && existsSync('/Applications')) {
+    for (const e of readdirSync('/Applications')) macApps.add(e);
   }
 
   const whichCmd = process.platform === 'win32' ? 'where' : 'which';
   const found = [];
   for (const ide of IDE_CANDIDATES) {
-    let hasCli = false;
-    try { execSync(`${whichCmd} ${ide.cmd}`, { stdio: 'ignore' }); hasCli = true; } catch {}
+    const hasCli = await runCmd(whichCmd, [ide.cmd]).then(() => true, () => false);
     const hasApp = ide.mac && macApps.has(ide.mac);
     if (hasCli || hasApp) {
       found.push({ id: ide.id, name: ide.name, cmd: ide.cmd });

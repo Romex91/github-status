@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { CHAOS } from './helpers.js';
 
@@ -7,7 +7,9 @@ mkdirSync(AI_CACHE_DIR, { recursive: true });
 
 export function readCacheEntry(key) {
   if (CHAOS && Math.random() < 0.2) { console.error(`[CHAOS] cache read failure for ${key}`); return null; }
-  try { return JSON.parse(readFileSync(`${AI_CACHE_DIR}${key}.json`, 'utf8')); } catch (e) { console.error(`Failed to read cache entry ${key}:`, e); return null; }
+  const path = `${AI_CACHE_DIR}${key}.json`;
+  if (!existsSync(path)) return null;
+  return JSON.parse(readFileSync(path, 'utf8'));
 }
 
 export function writeCacheEntry(key, entry) {
@@ -24,13 +26,13 @@ export function cleanAiCache(maxAgeDays = 3) {
   let removed = 0;
   for (const file of readdirSync(AI_CACHE_DIR)) {
     if (!file.endsWith('.json')) continue;
-    try {
-      const entry = JSON.parse(readFileSync(`${AI_CACHE_DIR}${file}`, 'utf8'));
-      if (new Date(entry.timestamp).getTime() < cutoff) {
-        unlinkSync(`${AI_CACHE_DIR}${file}`);
-        removed++;
-      }
-    } catch (e) { console.error(`Failed to process cache file ${file}:`, e); }
+    const path = `${AI_CACHE_DIR}${file}`;
+    if (!existsSync(path)) continue;
+    const entry = JSON.parse(readFileSync(path, 'utf8'));
+    if (new Date(entry.timestamp).getTime() < cutoff) {
+      unlinkSync(path);
+      removed++;
+    }
   }
   if (removed > 0) console.log(`Cleaned ${removed} stale cache entries`);
 }

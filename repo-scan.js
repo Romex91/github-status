@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { execSync } from 'node:child_process';
+import { runCmd } from './helpers.js';
 
 /**
  * Extract "org/repo" from a git remote URL.
@@ -16,11 +16,11 @@ function extractRepoFromRemote(remote) {
  * Read origin URL from .git/config without spawning a process.
  */
 function readOriginUrl(gitDir) {
-  try {
-    const config = readFileSync(join(gitDir, 'config'), 'utf8');
-    const m = config.match(/\[remote "origin"\][^\[]*?url\s*=\s*(.+)/);
-    return m ? m[1].trim() : null;
-  } catch { return null; }
+  const configPath = join(gitDir, 'config');
+  if (!existsSync(configPath)) return null;
+  const config = readFileSync(configPath, 'utf8');
+  const m = config.match(/\[remote "origin"\][^\[]*?url\s*=\s*(.+)/);
+  return m ? m[1].trim() : null;
 }
 
 /**
@@ -28,29 +28,28 @@ function readOriginUrl(gitDir) {
  * Returns branch name or null (detached HEAD).
  */
 function readCurrentBranch(gitDir) {
-  try {
-    const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim();
-    const m = head.match(/^ref: refs\/heads\/(.+)$/);
-    return m ? m[1] : null;
-  } catch { return null; }
+  const headPath = join(gitDir, 'HEAD');
+  if (!existsSync(headPath)) return null;
+  const head = readFileSync(headPath, 'utf8').trim();
+  const m = head.match(/^ref: refs\/heads\/(.+)$/);
+  return m ? m[1] : null;
 }
 
 /**
  * Read a ref's commit hash. Checks loose refs first, then packed-refs.
  */
 function readRef(gitDir, ref) {
-  // Loose ref
   const loosePath = join(gitDir, ref);
-  try {
+  if (existsSync(loosePath)) {
     return readFileSync(loosePath, 'utf8').trim();
-  } catch {}
+  }
 
-  // Packed refs
-  try {
-    const packed = readFileSync(join(gitDir, 'packed-refs'), 'utf8');
+  const packedPath = join(gitDir, 'packed-refs');
+  if (existsSync(packedPath)) {
+    const packed = readFileSync(packedPath, 'utf8');
     const m = packed.match(new RegExp(`^([0-9a-f]{40})\\s+${ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'm'));
     return m ? m[1] : null;
-  } catch {}
+  }
 
   return null;
 }
@@ -59,7 +58,7 @@ function readRef(gitDir, ref) {
  * Probe a single clone directory for branch, dirty, and behind-origin state.
  * Reads git internals directly where possible; only spawns git for dirty check.
  */
-function probeClone(dir, branch, headSha) {
+async function probeClone(dir, branch, headSha) {
   const gitDir = join(dir, '.git');
   const result = {
     path: dir,
@@ -84,14 +83,12 @@ function probeClone(dir, branch, headSha) {
     result.behindOrigin = !!(result.localHead && result.remoteHead && result.localHead !== result.remoteHead);
   }
 
-  // Dirty check — still needs git process (index comparison)
-  try {
-    const status = execSync('git status --porcelain', { cwd: dir, encoding: 'utf8', timeout: 3000 }).trim();
-    if (status) {
-      result.dirty = true;
-      result.changedFiles = status.split('\n');
-    }
-  } catch {}
+  // Dirty check — needs git process (index comparison)
+  const status = await runCmd('git', ['status', '--porcelain'], { cwd: dir });
+  if (status) {
+    result.dirty = true;
+    result.changedFiles = status.split('\n');
+  }
 
   return result;
 }
@@ -106,12 +103,8 @@ function probeClone(dir, branch, headSha) {
  */
 export async function scanForClones(repo, branch, headSha) {
   const home = homedir();
-  let entries;
-  try {
-    entries = readdirSync(home, { withFileTypes: true });
-  } catch {
-    return { clones: [], repo, branch, suggestedClonePath: '' };
-  }
+  if (!existsSync(home)) return { clones: [], repo, branch, suggestedClonePath: '' };
+  const entries = readdirSync(home, { withFileTypes: true });
 
   const skipDirs = new Set(['Downloads', 'Documents', 'Desktop', 'Library', 'Music', 'Movies', 'Pictures', 'Public', 'Applications']);
   const depth1 = entries
@@ -123,14 +116,11 @@ export async function scanForClones(repo, branch, headSha) {
     if (existsSync(join(dir, '.git'))) {
       gitDirs.push(dir);
     } else {
-      // Scan depth-2
-      try {
-        for (const sub of readdirSync(dir, { withFileTypes: true })) {
-          if (sub.isDirectory() && !sub.name.startsWith('.') && existsSync(join(dir, sub.name, '.git'))) {
-            gitDirs.push(join(dir, sub.name));
-          }
+      for (const sub of readdirSync(dir, { withFileTypes: true })) {
+        if (sub.isDirectory() && !sub.name.startsWith('.') && existsSync(join(dir, sub.name, '.git'))) {
+          gitDirs.push(join(dir, sub.name));
         }
-      } catch {}
+      }
     }
   }
 
@@ -142,7 +132,7 @@ export async function scanForClones(repo, branch, headSha) {
     if (!originUrl) continue;
     const remoteRepo = extractRepoFromRemote(originUrl);
     if (!remoteRepo || remoteRepo.toLowerCase() !== repoLower) continue;
-    clones.push(probeClone(dir, branch, headSha));
+    clones.push(await probeClone(dir, branch, headSha));
   }
 
   // Sort: on PR branch first, then clean, then dirty

@@ -1,6 +1,6 @@
 import http from 'node:http';
-import { spawn, execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { runCmd, gh, daysSince, todayStr } from './helpers.js';
 import { loadRepoColors, updateRepoColors } from './repo-colors.js';
@@ -14,7 +14,7 @@ import { detectIDEs } from './ide-detect.js';
 const PROJECT_DIR = new URL('.', import.meta.url).pathname;
 const PORT = process.env.PORT || 7777;
 
-const installedIDEs = detectIDEs();
+const installedIDEs = await detectIDEs();
 console.log(`Detected IDEs: ${installedIDEs.map(i => i.name).join(', ') || 'none'}`);
 
 // Capture tool versions at startup for error diagnostics
@@ -29,21 +29,38 @@ let ghUsername = null;
 let enqueueAIItems = null;
 let repoColorMap = loadRepoColors();
 
+// === Utilities ===
+
+function handlePost(req, res, fn) {
+  let body = '';
+  req.on('data', c => body += c);
+  req.on('end', async () => {
+    // eslint-disable-next-line no-restricted-syntax -- top-level POST handler: catches all errors and sends { error } as HTTP 500 to FE
+    try {
+      await fn(JSON.parse(body));
+    } catch (e) {
+      console.error(`${req.url} failed:`, e);
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    }
+  });
+}
+
 // === Version Check ===
 
 async function checkForUpdates() {
-  try {
-    try { await runCmd('git', ['fetch', 'origin', '--quiet']); } catch {} // fetch has no stdout, runCmd rejects on empty output
-    const local = (await runCmd('git', ['rev-parse', 'HEAD'])).trim();
-    const remote = (await runCmd('git', ['rev-parse', 'origin/main'])).trim();
-    if (local !== remote) {
-      const behind = (await runCmd('git', ['rev-list', '--count', `${local}..${remote}`])).trim();
-      const log = (await runCmd('git', ['log', '--format=%h %s%n%b%n---', `${local}..${remote}`])).trim();
+  await runCmd('git', ['fetch', 'origin', '--quiet']);
+  const local = await runCmd('git', ['rev-parse', 'HEAD']);
+  const remote = await runCmd('git', ['rev-parse', 'origin/main']);
+  if (local !== remote) {
+    const behind = parseInt(await runCmd('git', ['rev-list', '--count', `${local}..${remote}`]));
+    if (behind > 0) {
+      const log = await runCmd('git', ['log', '--format=%h %s%n%b%n---', `${local}..${remote}`]);
       const commits = log.split('\n---\n').map(l => l.trim()).filter(Boolean);
-      return { behind: parseInt(behind), local: local.slice(0, 7), remote: remote.slice(0, 7), commits };
+      return { behind, local: local.slice(0, 7), remote: remote.slice(0, 7), commits };
     }
-  } catch (e) {
-    console.error('Version check failed:', e.message);
   }
   return null;
 }
@@ -65,6 +82,7 @@ async function handleStatusStream(req, res) {
     res.write(`event: log\ndata: ${JSON.stringify({ message, type })}\n\n`);
   }
 
+  // eslint-disable-next-line no-restricted-syntax -- top-level SSE handler: catches all errors and sends fatal SSE event to FE
   try {
     const [myPRs, reviewPRs, rawMentionedPRs, username, assignedIssues, rawMentionedIssues, rawCreatedIssues, updateInfo] = await Promise.all([
       fetchMyPRs(log),
@@ -74,9 +92,13 @@ async function handleStatusStream(req, res) {
       fetchAssignedIssues(log),
       fetchMentionedIssues(log),
       fetchCreatedIssues(log),
-      checkForUpdates(),
+      checkForUpdates().catch(e => ({ error: e.message })),
     ]);
     ghUsername = username;
+
+    if (updateInfo && updateInfo.error) {
+      log(`Version check failed: ${updateInfo.error}`, 'error');
+    }
 
     // Deduplicate: remove mentioned PRs already in my PRs or review PRs
     const existingUrls = new Set([...myPRs, ...reviewPRs].map(pr => pr.html_url));
@@ -156,136 +178,96 @@ const server = http.createServer((req, res) => {
       onEnqueueReady: (fn) => { enqueueAIItems = fn; },
     });
   } else if (req.url === '/api/ai-enqueue' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', () => {
-      try {
-        const { indices } = JSON.parse(body);
-        if (enqueueAIItems && Array.isArray(indices)) enqueueAIItems(indices);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end('{"ok":true}');
-      } catch {
-        res.writeHead(400);
-        res.end('Bad request');
-      }
+    handlePost(req, res, (data) => {
+      const { indices } = data;
+      if (enqueueAIItems && Array.isArray(indices)) enqueueAIItems(indices);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"ok":true}');
     });
   } else if (req.url === '/api/chat' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', () => {
-      try {
-        const { index, action, clonePath } = JSON.parse(body);
-        const pr = pendingPRData && pendingPRData[index];
-        if (!pr) { res.writeHead(404); res.end(JSON.stringify({ error: 'Item not found. Reload the page.' })); return; }
+    handlePost(req, res, async (data) => {
+      const { index, action, clonePath } = data;
+      const pr = pendingPRData && pendingPRData[index];
+      if (!pr) { res.writeHead(404); res.end(JSON.stringify({ error: 'Item not found. Reload the page.' })); return; }
 
-        launchChat({
-          prompt: pr.chatContext || '',
-          url: pr.html_url,
-          repo: pr.repo,
-          number: pr.number,
-          title: pr.title,
-          isIssue: pr.isIssue,
-          branch: pr.details?.headRefName || '',
-          aiStatus: pr.aiStatus || '',
-          action: action || 'chat-here',
-          clonePath: clonePath || '',
-        });
+      await launchChat({
+        prompt: pr.chatContext || '',
+        url: pr.html_url,
+        repo: pr.repo,
+        number: pr.number,
+        title: pr.title,
+        isIssue: pr.isIssue,
+        branch: pr.details?.headRefName || '',
+        aiStatus: pr.aiStatus || '',
+        action: action || 'chat-here',
+        clonePath: clonePath || '',
+      });
 
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end('{"ok":true}');
-      } catch (e) {
-        console.error('Chat launch failed:', e);
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: e.message }));
-      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"ok":true}');
     });
   } else if (req.url === '/api/repo-scan' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', async () => {
-      try {
-        const { index } = JSON.parse(body);
-        const pr = pendingPRData && pendingPRData[index];
-        if (!pr) { res.writeHead(404); res.end(JSON.stringify({ error: 'Item not found. Reload the page.' })); return; }
+    handlePost(req, res, async (data) => {
+      const { index } = data;
+      const pr = pendingPRData && pendingPRData[index];
+      if (!pr) { res.writeHead(404); res.end(JSON.stringify({ error: 'Item not found. Reload the page.' })); return; }
 
-        const scanResult = await scanForClones(
-          pr.repo,
-          pr.isIssue ? null : (pr.details?.headRefName || null),
-          pr.isIssue ? null : (pr.details?.headRefOid || null)
-        );
+      const scanResult = await scanForClones(
+        pr.repo,
+        pr.isIssue ? null : (pr.details?.headRefName || null),
+        pr.isIssue ? null : (pr.details?.headRefOid || null)
+      );
 
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          ...scanResult,
-          title: pr.title,
-          number: pr.number,
-          isIssue: pr.isIssue,
-          url: pr.html_url,
-          aiStatus: pr.aiStatus || '',
-        }));
-      } catch (e) {
-        console.error('Repo scan failed:', e);
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: e.message }));
-      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        ...scanResult,
+        title: pr.title,
+        number: pr.number,
+        isIssue: pr.isIssue,
+        url: pr.html_url,
+        aiStatus: pr.aiStatus || '',
+      }));
     });
   } else if (req.url === '/api/repo-sync' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', () => {
-      try {
-        const { action, clonePath, branch } = JSON.parse(body);
-        if (!clonePath) { res.writeHead(400); res.end(JSON.stringify({ error: 'No clone path.' })); return; }
-        if (action === 'checkout' && branch) {
-          execSync(`git fetch origin`, { cwd: clonePath, encoding: 'utf8', timeout: 30000 });
-          execSync(`git checkout ${branch}`, { cwd: clonePath, encoding: 'utf8', timeout: 10000 });
-        } else if (action === 'pull') {
-          execSync('git pull', { cwd: clonePath, encoding: 'utf8', timeout: 30000 });
-        } else {
-          res.writeHead(400); res.end(JSON.stringify({ error: `Unknown sync action: ${action}` })); return;
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end('{"ok":true}');
-      } catch (e) {
-        console.error('Repo sync failed:', e);
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: e.message }));
+    handlePost(req, res, async (data) => {
+      const { action, clonePath, branch } = data;
+      if (!clonePath) { res.writeHead(400); res.end(JSON.stringify({ error: 'No clone path.' })); return; }
+      if (action === 'checkout' && branch) {
+        await runCmd('git', ['fetch', 'origin'], { cwd: clonePath });
+        await runCmd('git', ['checkout', branch], { cwd: clonePath });
+      } else if (action === 'pull') {
+        await runCmd('git', ['pull'], { cwd: clonePath });
+      } else {
+        res.writeHead(400); res.end(JSON.stringify({ error: `Unknown sync action: ${action}` })); return;
       }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"ok":true}');
     });
   } else if (req.url === '/api/open-ide' && req.method === 'POST') {
-    let body = '';
-    req.on('data', c => body += c);
-    req.on('end', async () => {
-      try {
-        const { cmd, clonePath } = JSON.parse(body);
-        const ide = installedIDEs.find(i => i.cmd === cmd);
-        if (!ide) { res.writeHead(400); res.end(JSON.stringify({ error: `IDE "${cmd}" not found.` })); return; }
-        if (!clonePath) { res.writeHead(400); res.end(JSON.stringify({ error: 'No clone path provided.' })); return; }
+    handlePost(req, res, (data) => {
+      const { cmd, clonePath } = data;
+      const ide = installedIDEs.find(i => i.cmd === cmd);
+      if (!ide) { res.writeHead(400); res.end(JSON.stringify({ error: `IDE "${cmd}" not found.` })); return; }
+      if (!clonePath) { res.writeHead(400); res.end(JSON.stringify({ error: 'No clone path provided.' })); return; }
 
-        spawn(ide.cmd, [clonePath], { stdio: 'ignore', detached: true }).unref();
+      spawn(ide.cmd, [clonePath], { stdio: 'ignore', detached: true }).unref();
 
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-      } catch (e) {
-        console.error('Open IDE failed:', e);
-        res.writeHead(500);
-        res.end(JSON.stringify({ error: e.message }));
-      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
     });
   } else if (req.url.startsWith('/public/') && req.method === 'GET') {
     const filePath = join(PROJECT_DIR, req.url);
     if (!filePath.startsWith(join(PROJECT_DIR, 'public'))) {
       res.writeHead(403); res.end('Forbidden'); return;
     }
-    try {
-      const content = readFileSync(filePath, 'utf8');
-      const ext = filePath.split('.').pop();
-      const mimeTypes = { js: 'application/javascript', css: 'text/css', html: 'text/html' };
-      res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'text/plain' });
-      res.end(content);
-    } catch {
-      res.writeHead(404); res.end('Not found');
+    if (!existsSync(filePath)) {
+      res.writeHead(404); res.end('Not found'); return;
     }
+    const content = readFileSync(filePath, 'utf8');
+    const ext = filePath.split('.').pop();
+    const mimeTypes = { js: 'application/javascript', css: 'text/css', html: 'text/html' };
+    res.writeHead(200, { 'Content-Type': mimeTypes[ext] || 'text/plain' });
+    res.end(content);
   } else {
     res.writeHead(404);
     res.end('Not found');

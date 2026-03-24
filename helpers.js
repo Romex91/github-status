@@ -5,7 +5,7 @@ export const CHAOS = false;
 
 export const CMD_TIMEOUT = 60000;
 
-export function runCmd(bin, args, { stdin, env: cmdEnv, signal } = {}) {
+export function runCmd(bin, args, { stdin, env: cmdEnv, signal, cwd } = {}) {
   const cmd = `${bin} ${args.join(' ')}`;
   let shellBin = bin, shellArgs = args;
   if (CHAOS) {
@@ -15,8 +15,8 @@ export function runCmd(bin, args, { stdin, env: cmdEnv, signal } = {}) {
   }
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new Error(`Aborted before start: ${cmd}`)); return; }
-    const child = spawn(shellBin, shellArgs, { env: cmdEnv, stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
-    const kill = () => { child.kill('SIGTERM'); setTimeout(() => { try { child.kill('SIGKILL'); } catch {} }, 2000); };
+    const child = spawn(shellBin, shellArgs, { cwd, env: cmdEnv, stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] });
+    const kill = () => { child.kill('SIGTERM'); setTimeout(() => { child.kill('SIGKILL'); }, 2000); };
     const timer = setTimeout(kill, CMD_TIMEOUT);
     const onAbort = () => { kill(); };
     signal?.addEventListener('abort', onAbort, { once: true });
@@ -28,7 +28,7 @@ export function runCmd(bin, args, { stdin, env: cmdEnv, signal } = {}) {
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
       if (signal?.aborted) reject(new Error(`Aborted: ${cmd}`));
-      else if (code === 0 && stdout.trim()) resolve(stdout.trim());
+      else if (code === 0) resolve(stdout.trim());
       else reject(new Error(code === null ? `Command timed out after ${CMD_TIMEOUT / 1000}s: ${cmd}` : `Command failed: ${cmd}\n${stderr || `Exit code ${code}`}`));
     });
     child.on('error', (err) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); reject(new Error(`Command failed: ${cmd}\n${err.message}`)); });

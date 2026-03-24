@@ -64,7 +64,6 @@ function createDialog() {
 
 // ─── Repo selection dialog ──────────────────────────────────────────────
 
-// eslint-disable-next-line no-unused-vars
 function showRepoSelectionDialog(index) {
   var dlg = createDialog();
   dlg.modal.innerHTML = '<div class="dlg-title">Scanning local repositories\u2026</div>' +
@@ -77,16 +76,8 @@ function showRepoSelectionDialog(index) {
   })
     .then(function (r) { return r.json(); })
     .then(function (data) {
-      if (data.error) {
-        dlg.modal.innerHTML = '<div class="dlg-title">Error</div><div class="dlg-error">' + esc(data.error) + '</div>' +
-          '<div class="dlg-footer"><button class="dlg-btn" onclick="this.closest(\'.dlg-modal\').remove();document.querySelector(\'.dlg-overlay\').remove()">Close</button></div>';
-        return;
-      }
+      if (data.error) throw new Error(data.error);
       renderRepoSelectionDialog(dlg, data, index);
-    })
-    .catch(function (err) {
-      dlg.modal.innerHTML = '<div class="dlg-title">Error</div><div class="dlg-error">' + esc(err.message) + '</div>' +
-        '<div class="dlg-footer"><button class="dlg-btn" onclick="this.closest(\'.dlg-modal\').remove();document.querySelector(\'.dlg-overlay\').remove()">Close</button></div>';
     });
 }
 
@@ -164,15 +155,14 @@ function renderRepoSelectionDialog(dlg, data, index) {
       })
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          if (d.error) { btn.disabled = false; btn.textContent = 'Retry'; alert(d.error); return; }
+          if (d.error) throw new Error(d.error);
           btn.remove();
           // Enable sibling action/IDE buttons in this row
           row.querySelectorAll('[data-action][disabled], [data-ide][disabled]').forEach(function (b) {
             b.disabled = false;
             b.classList.add('dlg-btn-primary');
           });
-        })
-        .catch(function (err) { btn.disabled = false; btn.textContent = 'Retry'; alert(err.message); });
+        });
     };
   });
 
@@ -199,11 +189,9 @@ function renderRepoSelectionDialog(dlg, data, index) {
       })
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          btn.disabled = false;
-          if (d.error) { alert(d.error); return; }
+          if (d.error) throw new Error(d.error);
           dlg.close();
-        })
-        .catch(function () { btn.disabled = false; });
+        });
     };
   });
 }
@@ -276,23 +264,13 @@ function launchAction(dlg, index, action, clonePath) {
   })
     .then(function (r) { return r.json(); })
     .then(function (d) {
-      if (d.error) {
-        statusDiv.className = 'dlg-error';
-        statusDiv.textContent = d.error;
-        dlg.modal.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
-        return;
-      }
+      if (d.error) throw new Error(d.error);
       dlg.close();
       // Show toast on the chat button
       var btn = document.querySelector('[onclick="showRepoSelectionDialog(' + index + ')"]');
       if (btn && typeof showCopyToast === 'function') {
         showCopyToast(btn, 'opened terminal window');
       }
-    })
-    .catch(function (err) {
-      statusDiv.className = 'dlg-error';
-      statusDiv.textContent = err.message;
-      dlg.modal.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
     });
 }
 

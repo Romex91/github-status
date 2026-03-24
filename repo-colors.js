@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 
 export const REPO_COLORS = [
   '#58a6ff', '#f778ba', '#7ee787', '#ffa657', '#d2a8ff',
@@ -9,7 +9,8 @@ export const REPO_COLORS = [
 const REPO_COLORS_PATH = new URL('./data/repo-colors.json', import.meta.url).pathname;
 
 export function loadRepoColors() {
-  try { return JSON.parse(readFileSync(REPO_COLORS_PATH, 'utf8')); } catch (e) { console.error('Failed to load repo colors:', e); return {}; }
+  if (!existsSync(REPO_COLORS_PATH)) return {};
+  return JSON.parse(readFileSync(REPO_COLORS_PATH, 'utf8'));
 }
 
 export function saveRepoColors(map) {

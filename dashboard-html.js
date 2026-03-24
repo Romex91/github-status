@@ -40,30 +40,39 @@ export const INDEX_HTML = `<!DOCTYPE html>
             window.scrollTo(0, document.body.scrollHeight);
         }
 
-        es.addEventListener('log', function(e) {
-            var data = JSON.parse(e.data);
-            addLog(data.message, data.type);
-        });
+        var _errorBanner = null;
+        function showError(err) {
+            console.error(err);
+            if (!_errorBanner) {
+                _errorBanner = document.createElement('div');
+                _errorBanner.style.cssText = 'background:#3d1f1f;color:#f85149;padding:6px 12px;font-size:12px;font-family:inherit;position:sticky;top:0;z-index:999;border-bottom:1px solid #f85149;';
+                _errorBanner.textContent = 'There are errors in dev console';
+                document.body.prepend(_errorBanner);
+            }
+        }
 
-        es.addEventListener('done', function(e) {
+        function onSSE(source, event, handler) {
+            source.addEventListener(event, function(e) {
+                var d = JSON.parse(e.data);
+                if (d.error) { showError(d.error); return; }
+                handler(d);
+            });
+        }
+
+        onSSE(es, 'log', function(d) { addLog(d.message, d.type); });
+        onSSE(es, 'done', function(d) {
             es.close();
-            var data = JSON.parse(e.data);
             document.open();
-            document.write(data.html);
+            document.write(d.html);
             document.close();
             window.scrollTo(0, 0);
         });
-
-        es.addEventListener('fatal', function(e) {
-            es.close();
-            var data = JSON.parse(e.data);
-            addLog('FATAL: ' + data.error, 'error');
-        });
+        onSSE(es, 'fatal', function() {});
 
         es.onerror = function() {
             if (es.readyState === EventSource.CLOSED) return;
             es.close();
-            addLog('Connection lost', 'error');
+            showError('Status stream connection lost');
         };
 
         addLog('Connecting...', 'info');
@@ -89,7 +98,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
     }
     return `<td class="status-col" id="status-${globalIndex}">
                     <span class="status-text">waiting...</span>
-                    <br><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span><span class="action-btn" onclick="showRepoSelectionDialog(${globalIndex})">actions</span>
+                    <br><span id="inline-actions-${globalIndex}"></span><span class="action-btn action-btn-accent" onclick="showRepoSelectionDialog(${globalIndex})">pick git clone</span><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
   }
@@ -122,7 +131,9 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
   }
 
   let updateHtml = '';
-  if (updateInfo) {
+  if (updateInfo && updateInfo.error) {
+    updateHtml = `<div style="background:#3d1f1f;border:1px solid #f85149;border-radius:6px;padding:8px 12px;margin:8px 0;color:#f85149;font-size:13px">Version check failed: ${escapeHtml(updateInfo.error)}</div>`;
+  } else if (updateInfo) {
     const commitItems = updateInfo.commits.map(c => {
       const lines = c.split('\n');
       const title = lines[0];
@@ -214,6 +225,10 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
         .copy-prompt:hover { color: #58a6ff; }
         .action-btn { cursor: pointer; color: #484f58; font-size: 10px; margin-left: 8px; }
         .action-btn:hover { color: #58a6ff; }
+        .action-btn-accent { color: #58a6ff; }
+        .action-btn-accent:hover { color: #79c0ff; }
+        .inline-action { cursor: pointer; color: #3fb950; font-size: 10px; margin-right: 8px; }
+        .inline-action:hover { color: #56d364; }
         .prompt-tooltip { display: none; position: absolute; left: 0; top: 100%; background: #161b22; border: 1px solid #30363d; border-radius: 4px; padding: 6px 8px; color: #8b949e; font-size: 11px; white-space: pre-wrap; width: max-content; max-width: 600px; max-height: 80vh; overflow-y: auto; z-index: 10; margin-top: 4px; }
         .copy-prompt:hover .prompt-tooltip { display: block; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
@@ -240,7 +255,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
 </head>
 <body>
     ${updateHtml}
-    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
+    <h1>GitHub Status - ${date}${updateInfo && !updateInfo.error ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
     <div class="fold-controls"><a onclick="foldAll()">Fold all</a><a onclick="unfoldAll()">Unfold all</a></div>
 
     <h1 class="section-heading">Pull Requests</h1>
@@ -365,6 +380,41 @@ ${createdIssueRows}
             document.querySelectorAll('h2').forEach(function(h) { h.classList.remove('folded'); });
         }
 
+        var _errorBanner = null;
+        function showError(err) {
+            console.error(err);
+            if (!_errorBanner) {
+                _errorBanner = document.createElement('div');
+                _errorBanner.style.cssText = 'background:#3d1f1f;color:#f85149;padding:6px 12px;font-size:12px;font-family:inherit;position:sticky;top:0;z-index:999;border-bottom:1px solid #f85149;';
+                _errorBanner.textContent = 'There are errors in dev console';
+                document.body.prepend(_errorBanner);
+            }
+        }
+        window.addEventListener('unhandledrejection', function(e) { showError(e.reason); });
+        window.onerror = function(msg, src, line, col, err) { showError(err || msg); };
+
+        var _clonePaths = {};
+        function inlineChat(index) {
+            fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ index: index, action: 'chat-here', clonePath: _clonePaths[index] || '' })
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.error) throw new Error(d.error);
+                var el = document.getElementById('inline-actions-' + index);
+                if (el) showCopyToast(el, 'opened terminal window');
+            });
+        }
+        function inlineIDE(cmd, index) {
+            fetch('/api/open-ide', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cmd: cmd, clonePath: _clonePaths[index] || '' })
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.error) throw new Error(d.error);
+            });
+        }
+
         function copyPrompt(index) {
             var log = document.getElementById('ai-log-' + index);
             var text = log.textContent || '';
@@ -405,8 +455,49 @@ ${createdIssueRows}
         var es = new EventSource('/api/ai-stream');
         var phaseTimers = {};
 
-        es.addEventListener('ai-phase', function(e) {
-            var d = JSON.parse(e.data);
+        function onSSE(source, event, handler) {
+            source.addEventListener(event, function(e) {
+                var d = JSON.parse(e.data);
+                if (d.error) { showError(d.error); return; }
+                handler(d);
+            });
+        }
+
+        var pendingScanQueue = [];
+        var scanRunning = false;
+        function drainScanQueue() {
+            if (scanRunning || !pendingScanQueue.length) return;
+            scanRunning = true;
+            var idx = pendingScanQueue.shift();
+            fetch('/api/repo-scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ index: idx })
+            }).then(function(r) { return r.json(); }).then(function(scan) {
+                if (scan.error) throw new Error(scan.error);
+                var match = null;
+                for (var j = 0; j < (scan.clones || []).length; j++) {
+                    var c = scan.clones[j];
+                    if (c.onPRBranch && !c.behindOrigin && !c.dirty) { match = c.path; break; }
+                }
+                if (!match) return;
+                var inlineEl = document.getElementById('inline-actions-' + idx);
+                if (!inlineEl) return;
+                _clonePaths[idx] = match;
+                var h = '<span class="inline-action" onclick="inlineChat(' + idx + ')">chat</span>';
+                var ides = (typeof INSTALLED_IDES !== 'undefined') ? INSTALLED_IDES : [];
+                for (var k = 0; k < ides.length; k++) {
+                    var cmd = ides[k].cmd.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+                    h += '<span class="inline-action" onclick="inlineIDE(&quot;' + cmd + '&quot;,' + idx + ')">' + ides[k].name.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>';
+                }
+                inlineEl.innerHTML = h;
+            }).finally(function() {
+                scanRunning = false;
+                drainScanQueue();
+            });
+        }
+
+        onSSE(es, 'ai-phase', function(d) {
             var cell = document.getElementById('status-' + d.index);
             if (!cell) return;
             var statusSpan = cell.querySelector('.status-text');
@@ -416,17 +507,16 @@ ${createdIssueRows}
             if (phaseTimers[d.index]) clearInterval(phaseTimers[d.index]);
             function update() {
                 var elapsed = Math.floor((Date.now() - startTime) / 1000);
-                statusSpan.textContent = 'Running \`' + d.phase + '\` for ' + elapsed + 's';
+                statusSpan.textContent = 'Running "' + d.phase + '" for ' + elapsed + 's';
                 if (branchCell && branchCell.classList.contains('status-loading')) {
-                    branchCell.textContent = 'Running \`' + d.phase + '\` for ' + elapsed + 's';
+                    branchCell.textContent = 'Running "' + d.phase + '" for ' + elapsed + 's';
                 }
             }
             update();
             phaseTimers[d.index] = setInterval(update, 1000);
         });
 
-        es.addEventListener('pr-details', function(e) {
-            var d = JSON.parse(e.data);
+        onSSE(es, 'pr-details', function(d) {
             var branchCell = document.getElementById('branch-' + d.index);
             if (branchCell) {
                 branchCell.classList.remove('status-loading');
@@ -451,10 +541,10 @@ ${createdIssueRows}
                     ciCell.textContent = '';
                 }
             }
+            pendingScanQueue.push(d.index); drainScanQueue();
         });
 
-        es.addEventListener('ai-log', function(e) {
-            var d = JSON.parse(e.data);
+        onSSE(es, 'ai-log', function(d) {
             var log = document.getElementById('ai-log-' + d.index);
             log.textContent += d.text;
             var btn = log.parentNode.querySelector('.copy-prompt');
@@ -462,12 +552,11 @@ ${createdIssueRows}
             if (tooltip) tooltip.textContent = log.textContent;
         });
 
-        es.addEventListener('ai-done', function(e) {
-            var d = JSON.parse(e.data);
+        onSSE(es, 'ai-done', function(d) {
             if (phaseTimers[d.index]) { clearInterval(phaseTimers[d.index]); delete phaseTimers[d.index]; }
             var cell = document.getElementById('status-' + d.index);
             var logDiv = document.getElementById('ai-log-' + d.index);
-            logDiv.textContent += '\\n--- Result ---\\n' + JSON.stringify({statusText: d.statusText, statusClass: d.statusClass}, null, 2);
+            logDiv.textContent += '\\\\n--- Result ---\\\\n' + JSON.stringify({statusText: d.statusText, statusClass: d.statusClass}, null, 2);
             var btn = cell.querySelector('.copy-prompt');
             if (btn) btn.setAttribute('data-preview', logDiv.textContent.slice(0, 500) + (logDiv.textContent.length > 500 ? '...' : ''));
             var statusSpan = cell.querySelector('.status-text');
@@ -476,30 +565,12 @@ ${createdIssueRows}
             cell.className = 'status-col status-' + d.statusClass;
         });
 
-        es.addEventListener('ai-error', function(e) {
-            var d = JSON.parse(e.data);
-            if (phaseTimers[d.index]) { clearInterval(phaseTimers[d.index]); delete phaseTimers[d.index]; }
-            var cell = document.getElementById('status-' + d.index);
-            var logDiv = document.getElementById('ai-log-' + d.index);
-            logDiv.textContent += '\\nERROR: ' + d.error;
-            var tooltip = document.getElementById('prompt-tooltip-' + d.index);
-            if (tooltip) tooltip.textContent = logDiv.textContent;
-            var statusSpan = cell.querySelector('.status-text');
-            statusSpan.className = 'status-text';
-            statusSpan.textContent = 'ERROR: ' + d.error;
-            cell.className = 'status-col status-bad';
-            var copyBtn = cell.querySelector('.copy-prompt');
-            if (copyBtn) {
-                copyBtn.childNodes[0].textContent = 'copy error';
-                copyBtn.onclick = function() {
-                    navigator.clipboard.writeText(d.error).then(function() { showCopyToast(copyBtn); });
-                };
-            }
-        });
+        onSSE(es, 'ai-error', function() {});
 
         es.onerror = function() {
             if (es.readyState === EventSource.CLOSED) return;
             es.close();
+            showError('AI stream connection lost');
         };
 
         document.querySelectorAll('.status-text').forEach(function(el) {
@@ -520,7 +591,7 @@ ${createdIssueRows}
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({indices: indices})
-            });
+            }).then(function(r) { if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || 'HTTP ' + r.status); }); });
         }
 
         var observer = new IntersectionObserver(function(entries) {

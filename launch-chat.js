@@ -1,5 +1,6 @@
-import { spawn, execSync } from 'node:child_process';
-import { writeFileSync, mkdirSync, readdirSync, unlinkSync, statSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { runCmd } from './helpers.js';
+import { writeFileSync, mkdirSync, readdirSync, unlinkSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { platform } from 'node:os';
 
@@ -13,13 +14,13 @@ export function cleanChatPrompts(maxAgeDays = 1) {
   const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
   let removed = 0;
   for (const file of readdirSync(PROMPTS_DIR)) {
-    try {
-      const st = statSync(join(PROMPTS_DIR, file));
-      if (st.mtimeMs < cutoff) {
-        unlinkSync(join(PROMPTS_DIR, file));
-        removed++;
-      }
-    } catch {}
+    const filePath = join(PROMPTS_DIR, file);
+    if (!existsSync(filePath)) continue;
+    const st = statSync(filePath);
+    if (st.mtimeMs < cutoff) {
+      unlinkSync(filePath);
+      removed++;
+    }
   }
   if (removed > 0) console.log(`Cleaned ${removed} stale chat prompt(s)`);
 }
@@ -40,18 +41,18 @@ export function cleanChatPrompts(maxAgeDays = 1) {
  * @param {string} [opts.action] - "checkout", "pull", "clone", "chat-here"
  * @param {string} [opts.clonePath] - Path to local clone (for checkout/pull/chat-here)
  */
-export function launchChat({ prompt, url, repo, number, title, isIssue, branch, aiStatus, action = 'chat-here', clonePath }) {
+export async function launchChat({ prompt, url, repo, number, title, isIssue, branch, aiStatus, action = 'chat-here', clonePath }) {
   const itemType = isIssue ? 'issue' : 'PR';
   const repoShort = repo.split('/').pop();
 
   // Execute git action if needed
   if (clonePath && action === 'checkout' && branch) {
-    execSync(`git checkout ${branch}`, { cwd: clonePath, encoding: 'utf8', timeout: 10000 });
+    await runCmd('git', ['checkout', branch], { cwd: clonePath });
   } else if (clonePath && action === 'pull') {
-    execSync('git pull', { cwd: clonePath, encoding: 'utf8', timeout: 30000 });
+    await runCmd('git', ['pull'], { cwd: clonePath });
   } else if (action === 'clone' && clonePath && branch) {
-    execSync(`gh repo clone ${repo} ${clonePath}`, { encoding: 'utf8', timeout: 60000 });
-    execSync(`git checkout ${branch}`, { cwd: clonePath, encoding: 'utf8', timeout: 10000 });
+    await runCmd('gh', ['repo', 'clone', repo, clonePath]);
+    await runCmd('git', ['checkout', branch], { cwd: clonePath });
   }
 
   // Write prompt to data/chat-prompts/
@@ -104,14 +105,15 @@ ${prompt}
       ];
       let launched = false;
       for (const [bin, args] of terminals) {
-        try {
+        const found = await runCmd('which', [bin]).then(() => true, () => false);
+        if (found) {
           spawn(bin, args, { stdio: 'ignore', detached: true }).unref();
           launched = true;
           break;
-        } catch {}
+        }
       }
       if (!launched) {
-        console.error('No supported terminal emulator found. Tried: ' + terminals.map(t => t[0]).join(', '));
+        throw new Error('No supported terminal emulator found. Tried: ' + terminals.map(t => t[0]).join(', '));
       }
     }
   }
