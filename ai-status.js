@@ -17,6 +17,7 @@ function buildTimeline(d) {
       type: 'comment',
       threadId: null,
       body: c.body || '',
+      url: c.url || null,
     });
   }
 
@@ -43,6 +44,9 @@ function buildTimeline(d) {
       line: rc.line,
       diffHunk: rc.diffHunk,
       body: rc.body || '',
+      url: rc.url || null,
+      htmlUrl: d.htmlUrl || null,
+      commentId: rc.id,
     });
   }
 
@@ -57,7 +61,8 @@ function buildTimeline(d) {
       const id = e.id ? ` [id:${e.id}]` : '';
       const lineSuffix = e.line ? `:${e.line}` : '';
       const path = e.path ? ` [${e.path}${lineSuffix}]` : '';
-      const prefix = `[${ts}] @${e.author} [${e.type}]${id}${thread}${path}`;
+      const urlSuffix = e.url ? ` (comment url:${e.url})` : '';
+      const prefix = `[${ts}] @${e.author} [${e.type}]${id}${thread}${path}${urlSuffix}`;
       const diffContext = e.diffHunk ? `\n    \`\`\` diff ${e.path}:${e.line}\n    ${e.diffHunk.split('\n').slice(-5).join('\n    ')}\n    \`\`\`` : '';
       const body = e.body.slice(0, 300).replace(/\n/g, '\n  ');
       return `${prefix}${diffContext}\n  ${body}`;
@@ -75,7 +80,7 @@ export function buildContextForPR(pr) {
     url: c.detailsUrl || c.targetUrl || '',
   }));
 
-  const typeMap = { mine: 'My PR', review: 'Review requested from me', mentioned: 'Mentioned in this PR' };
+  const typeMap = { mine: 'My PR', review: 'Review requested from me', mentioned: 'Mentioned in this PR', 'commented-pr': 'I commented on this PR' };
 
   const pendingReviewers = (d.reviewRequests || []).map(r => r.login || r.name || r.slug || 'unknown');
   // Resolve effective review state: COMMENTED doesn't override a prior APPROVED
@@ -145,7 +150,15 @@ export function buildPromptForPR(pr, ghUsername) {
 - If I (${ghUsername}) have already commented or reviewed on this PR, start statusText with "RESPONDED. " and use statusClass "good"
 - good: I already responded, conversation resolved, PR merged/closed, or no action needed from me
 - warning: Conversation is ongoing and may need my input
-- bad: I was asked a question or requested an action and haven't responded`;
+- bad: I was asked a question or requested an action and haven't responded
+- IMPORTANT: Also return a "correspondence" array with question/answer citations from the timeline. Each entry: {"question":"<exact quote>","questionUrl":"<comment URL>","answer":"<exact quote or null>","answerUrl":"<comment URL or null>"}. Focus on: What was I asked? Did I respond?`;
+
+  const commentedRules = `${commonRules}
+- I commented on this PR. Focus on: Did they respond to my comment? What was the question and answer?
+- good: they responded, conversation resolved
+- warning: they responded but may need follow-up
+- bad: no response to my comment yet
+- IMPORTANT: Return a "correspondence" array with question/answer citations. Each entry: {"question":"<exact quote of my question/comment>","questionUrl":"<comment URL>","answer":"<exact quote of their response or null>","answerUrl":"<comment URL or null>"}`;
 
   const standardRules = `${commonRules}
 - Check approval requirements: reviewDecision "APPROVED" means all branch protection requirements are met. "REVIEW_REQUIRED" means approvals are still needed — mention pending reviewers by name.
@@ -154,13 +167,17 @@ export function buildPromptForPR(pr, ghUsername) {
 - bad: CI failures without approval, or stale 50+ days
 - For review-requested PRs: focus on what the reviewer needs to know`;
 
-  const rules = pr.section === 'mentioned' ? mentionedRules : standardRules;
+  const isCorrespondence = pr.section === 'mentioned' || pr.section === 'commented-pr';
+  const rules = pr.section === 'mentioned' ? mentionedRules : pr.section === 'commented-pr' ? commentedRules : standardRules;
+  const returnShape = isCorrespondence
+    ? '{"statusText":"<description>","statusClass":"<good|warning|bad>","correspondence":[{"question":"<exact quote>","questionUrl":"<URL>","answer":"<exact quote or null>","answerUrl":"<URL or null>"}]}'
+    : '{"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>","ciUrl":"<failing CI URL or null>"}';
 
   return `You are a JSON API. Analyze this GitHub PR and return ONLY a single JSON object (no markdown fences, no explanation).
 
 ${context}
 
-Return: {"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>","ciUrl":"<failing CI URL or null>"}
+Return: ${returnShape}
 
 Rules:${rules}`;
 }
@@ -169,11 +186,14 @@ export function buildContextForIssue(issue) {
   const d = issue.details || {};
 
   const comments = (d.comments || [])
-    .map(c => `@${c.author?.login}:\n  ${(c.body || '').slice(0, 300).replace(/\n/g, '\n  ')}`);
+    .map(c => {
+      const urlSuffix = c.url ? ` (comment url:${c.url})` : '';
+      return `@${c.author?.login}${urlSuffix}:\n  ${(c.body || '').slice(0, 300).replace(/\n/g, '\n  ')}`;
+    });
 
   const assignees = (d.assignees || []).map(a => a.login);
 
-  const typeMap = { 'assigned-issue': 'Assigned to me', 'mentioned-issue': 'Mentioned in this issue', 'created-issue': 'Created by me' };
+  const typeMap = { 'assigned-issue': 'Assigned to me', 'mentioned-issue': 'Mentioned in this issue', 'created-issue': 'Created by me', 'commented-issue': 'I commented on this issue' };
 
   return [
     `Title: ${issue.title}`,
@@ -190,21 +210,44 @@ export function buildContextForIssue(issue) {
 export function buildPromptForIssue(issue, ghUsername) {
   const context = buildContextForIssue(issue);
 
-  return `You are a JSON API. Analyze this GitHub issue and return ONLY a single JSON object (no markdown fences, no explanation).
+  const isCorrespondence = issue.section === 'mentioned-issue' || issue.section === 'commented-issue';
 
-My GitHub username is: ${ghUsername}
-
-${context}
-
-Return: {"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>"}
-
-Rules:
+  const standardRules = `
 - ALWAYS start statusText with "Waiting on @username:" or "Action needed by @username:" identifying who must act next based on the comment thread
 - If no comments exist, use the assignee(s). If no assignee, use the issue author.
 - bad: I (${ghUsername}) need to take action and haven't yet
 - warning: Issue is active, may need my attention soon, or I should check in
 - good: No action needed from me right now (waiting on others, stale/low-priority, or I already responded)
 - Be specific about what action is needed if any`;
+
+  const mentionedIssueRules = `
+- I was mentioned in this issue. Focus on: What was I asked? Did I respond?
+- bad: I was asked something and haven't responded
+- warning: Conversation is ongoing and may need my input
+- good: I already responded, or no action needed from me
+- IMPORTANT: Return a "correspondence" array with question/answer citations. Each entry: {"question":"<exact quote>","questionUrl":"<comment URL>","answer":"<exact quote or null>","answerUrl":"<comment URL or null>"}`;
+
+  const commentedIssueRules = `
+- I commented on this issue. Focus on: Did they respond to my comment?
+- good: they responded, conversation resolved
+- warning: they responded but may need follow-up
+- bad: no response to my comment yet
+- IMPORTANT: Return a "correspondence" array with question/answer citations. Each entry: {"question":"<exact quote of my comment>","questionUrl":"<comment URL>","answer":"<exact quote of their response or null>","answerUrl":"<comment URL or null>"}`;
+
+  const rules = issue.section === 'mentioned-issue' ? mentionedIssueRules : issue.section === 'commented-issue' ? commentedIssueRules : standardRules;
+  const returnShape = isCorrespondence
+    ? '{"statusText":"<description>","statusClass":"<good|warning|bad>","correspondence":[{"question":"<exact quote>","questionUrl":"<URL>","answer":"<exact quote or null>","answerUrl":"<URL or null>"}]}'
+    : '{"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>"}';
+
+  return `You are a JSON API. Analyze this GitHub issue and return ONLY a single JSON object (no markdown fences, no explanation).
+
+My GitHub username is: ${ghUsername}
+
+${context}
+
+Return: ${returnShape}
+
+Rules:${rules}`;
 }
 
 function buildPromptForItem(item, ghUsername) {
@@ -284,7 +327,7 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
         fetchPRSummary(pr.repo, pr.number, signal),
         fetchPRPromptData(pr.repo, pr.number, signal),
       ]);
-      pr.details = { ...summary, ...promptData };
+      pr.details = { ...summary, ...promptData, htmlUrl: pr.html_url };
       const repoShort = pr.repo.split('/').pop();
       const branch = summary.headRefName || '';
       const failing = (summary.statusCheckRollup || []).filter(c => {
@@ -314,7 +357,7 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
       sendIfActive(index, 'ai-log', { index, text: `[AI response was cached to save tokens — ${cached.timestamp}]\n\n=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n` });
       const { statusText, statusClass } = applyOverrides(pr, cached.statusText, cached.statusClass);
       pr.aiStatus = statusText;
-      sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null });
+      sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null, correspondence: cached.correspondence || null });
       return;
     }
 
@@ -328,15 +371,17 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
     const rawStatusText = status.statusText || 'Unknown';
     const rawStatusClass = status.statusClass || 'warning';
     const rawCiUrl = status.ciUrl || null;
+    const rawCorrespondence = status.correspondence || null;
     writeCacheEntry(cacheKey, {
       statusText: rawStatusText,
       statusClass: rawStatusClass,
       ciUrl: rawCiUrl,
+      correspondence: rawCorrespondence,
       timestamp: new Date().toISOString(),
     });
     const { statusText, statusClass } = applyOverrides(pr, rawStatusText, rawStatusClass);
     pr.aiStatus = statusText;
-    sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl });
+    sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl, correspondence: rawCorrespondence });
   }
 
   async function runOne(index) {

@@ -1,10 +1,10 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { runCmd, gh, daysSince, todayStr } from './helpers.js';
 import { loadRepoColors, updateRepoColors } from './repo-colors.js';
-import { fetchMyPRs, fetchReviewPRs, fetchMentionedPRs, fetchAssignedIssues, fetchMentionedIssues, fetchCreatedIssues } from './github-api.js';
+import { fetchMyPRs, fetchReviewPRs, fetchMentionedPRs, fetchAssignedIssues, fetchMentionedIssues, fetchCreatedIssues, fetchCommentedPRs, fetchCommentedIssues } from './github-api.js';
 import { handleAIStream } from './ai-status.js';
 import { INDEX_HTML, buildDashboardHtml } from './dashboard-html.js';
 import { launchChat } from './launch-chat.js';
@@ -13,6 +13,30 @@ import { detectIDEs } from './ide-detect.js';
 
 const PROJECT_DIR = new URL('.', import.meta.url).pathname;
 const PORT = process.env.PORT || 7777;
+const DATA_DIR = join(PROJECT_DIR, 'data');
+const PERIOD_FILE = join(DATA_DIR, 'period.json');
+const VALID_PERIODS = ['7d', '30d', '90d', 'all'];
+
+function readPeriod() {
+  if (existsSync(PERIOD_FILE)) {
+    const val = JSON.parse(readFileSync(PERIOD_FILE, 'utf8')).period;
+    if (VALID_PERIODS.includes(val)) return val;
+  }
+  return '30d';
+}
+
+function writePeriod(val) {
+  if (!VALID_PERIODS.includes(val)) return false;
+  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(PERIOD_FILE, JSON.stringify({ period: val }));
+  return true;
+}
+
+function periodToSince(period) {
+  if (period === 'all') return null;
+  const days = { '7d': 7, '30d': 30, '90d': 90 }[period] || 30;
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
 
 // Global safety net: log unhandled rejections instead of crashing
 process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
@@ -88,14 +112,20 @@ async function handleStatusStream(req, res) {
 
   // eslint-disable-next-line no-restricted-syntax -- top-level SSE handler: catches all errors and sends fatal SSE event to FE
   try {
-    const [myPRs, reviewPRs, rawMentionedPRs, username, assignedIssues, rawMentionedIssues, rawCreatedIssues, updateInfo] = await Promise.all([
+    const period = readPeriod();
+    const since = periodToSince(period);
+    const sinceQuery = since || '2000-01-01';
+
+    const [myPRs, reviewPRs, rawMentionedPRs, username, assignedIssues, rawMentionedIssues, rawCreatedIssues, rawCommentedPRs, rawCommentedIssues, updateInfo] = await Promise.all([
       fetchMyPRs(log),
       fetchReviewPRs(log),
-      fetchMentionedPRs(log),
+      fetchMentionedPRs(log, sinceQuery),
       gh('api', 'user', '--jq', '.login').then(s => s.trim()),
       fetchAssignedIssues(log),
-      fetchMentionedIssues(log),
+      fetchMentionedIssues(log, sinceQuery),
       fetchCreatedIssues(log),
+      fetchCommentedPRs(log, sinceQuery),
+      fetchCommentedIssues(log, sinceQuery),
       checkForUpdates(),
     ]);
     ghUsername = username;
@@ -112,25 +142,35 @@ async function handleStatusStream(req, res) {
     const mentionedIssues = rawMentionedIssues.filter(i => !assignedIssueUrls.has(i.html_url));
     const createdIssuesDeduped = rawCreatedIssues.filter(i => !assignedIssueUrls.has(i.html_url) && !mentionedIssues.some(m => m.html_url === i.html_url));
 
+    // Commented PRs/Issues: remove self-authored PRs (I always comment on my own)
+    const commentedPRs = rawCommentedPRs.filter(pr => pr.author !== username);
+    const commentedIssues = rawCommentedIssues;
+
     const allPRs = [
       ...myPRs.map(pr => ({ ...pr, section: 'mine' })),
       ...reviewPRs.map(pr => ({ ...pr, section: 'review' })),
-      ...mentionedPRs.map(pr => ({ ...pr, section: 'mentioned' })),
     ];
 
     const allIssues = [
       ...assignedIssues.map(i => ({ ...i, section: 'assigned-issue', isIssue: true })),
-      ...mentionedIssues.map(i => ({ ...i, section: 'mentioned-issue', isIssue: true })),
       ...createdIssuesDeduped.map(i => ({ ...i, section: 'created-issue', isIssue: true })),
+    ];
+
+    const allCorrespondence = [
+      ...mentionedPRs.map(pr => ({ ...pr, section: 'mentioned' })),
+      ...commentedPRs.map(pr => ({ ...pr, section: 'commented-pr' })),
+      ...mentionedIssues.map(i => ({ ...i, section: 'mentioned-issue', isIssue: true })),
+      ...commentedIssues.map(i => ({ ...i, section: 'commented-issue', isIssue: true })),
     ];
 
     allPRs.forEach(pr => { pr.days = daysSince(pr.updated_at); });
     allIssues.forEach(issue => { issue.days = daysSince(issue.updated_at); });
+    allCorrespondence.forEach(item => { item.days = daysSince(item.updated_at); });
 
     log('Rendering dashboard...', 'success');
 
     // Store all items for phase 2 (AI streaming)
-    const allItems = [...allPRs, ...allIssues];
+    const allItems = [...allPRs, ...allIssues, ...allCorrespondence];
     pendingPRData = allItems;
 
     // Build clone index once for all repo-scan lookups
@@ -144,11 +184,13 @@ async function handleStatusStream(req, res) {
     const date = todayStr();
     const myPRsForHtml = allPRs.filter(pr => pr.section === 'mine');
     const reviewPRsForHtml = allPRs.filter(pr => pr.section === 'review');
-    const mentionedPRsForHtml = allPRs.filter(pr => pr.section === 'mentioned');
-    const assignedIssuesForHtml = allItems.filter(i => i.section === 'assigned-issue');
-    const mentionedIssuesForHtml = allItems.filter(i => i.section === 'mentioned-issue');
-    const createdIssuesForHtml = allItems.filter(i => i.section === 'created-issue');
-    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, mentionedPRsForHtml, assignedIssuesForHtml, mentionedIssuesForHtml, createdIssuesForHtml, date, updateInfo, { repoColorMap, installedIDEs });
+    const assignedIssuesForHtml = allIssues.filter(i => i.section === 'assigned-issue');
+    const createdIssuesForHtml = allIssues.filter(i => i.section === 'created-issue');
+    const mentionedPRsForHtml = allCorrespondence.filter(i => i.section === 'mentioned');
+    const commentedPRsForHtml = allCorrespondence.filter(i => i.section === 'commented-pr');
+    const mentionedIssuesForHtml = allCorrespondence.filter(i => i.section === 'mentioned-issue');
+    const commentedIssuesForHtml = allCorrespondence.filter(i => i.section === 'commented-issue');
+    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, assignedIssuesForHtml, createdIssuesForHtml, mentionedPRsForHtml, commentedPRsForHtml, mentionedIssuesForHtml, commentedIssuesForHtml, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername });
 
     if (!closed) {
       res.write(`event: done\ndata: ${JSON.stringify({ html })}\n\n`);
@@ -168,12 +210,15 @@ async function handleStatusStream(req, res) {
 // === Server ===
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/' && req.method === 'GET') {
+  const parsedUrl = new URL(req.url, 'http://localhost');
+  const pathname = parsedUrl.pathname;
+
+  if (pathname === '/' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(INDEX_HTML);
-  } else if (req.url === '/api/status' && req.method === 'GET') {
+  } else if (pathname === '/api/status' && req.method === 'GET') {
     handleStatusStream(req, res);
-  } else if (req.url === '/api/ai-stream' && req.method === 'GET') {
+  } else if (pathname === '/api/ai-stream' && req.method === 'GET') {
     handleAIStream(req, res, {
       allItems: pendingPRData,
       ghUsername,
@@ -181,14 +226,14 @@ const server = http.createServer((req, res) => {
       claudeVersion,
       onEnqueueReady: (fn) => { enqueueAIItems = fn; },
     });
-  } else if (req.url === '/api/ai-enqueue' && req.method === 'POST') {
+  } else if (pathname === '/api/ai-enqueue' && req.method === 'POST') {
     handlePost(req, res, (data) => {
       const { indices } = data;
       if (enqueueAIItems && Array.isArray(indices)) enqueueAIItems(indices);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end('{"ok":true}');
     });
-  } else if (req.url === '/api/chat' && req.method === 'POST') {
+  } else if (pathname === '/api/chat' && req.method === 'POST') {
     handlePost(req, res, async (data) => {
       const { index, action, clonePath } = data;
       const pr = pendingPRData && pendingPRData[index];
@@ -210,7 +255,7 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end('{"ok":true}');
     });
-  } else if (req.url === '/api/repo-scan' && req.method === 'POST') {
+  } else if (pathname === '/api/repo-scan' && req.method === 'POST') {
     handlePost(req, res, async (data) => {
       const { index, rescan } = data;
       const pr = pendingPRData && pendingPRData[index];
@@ -235,7 +280,7 @@ const server = http.createServer((req, res) => {
         aiStatus: pr.aiStatus || '',
       }));
     });
-  } else if (req.url === '/api/repo-sync' && req.method === 'POST') {
+  } else if (pathname === '/api/repo-sync' && req.method === 'POST') {
     handlePost(req, res, async (data) => {
       const { action, clonePath, branch } = data;
       if (!clonePath) { res.writeHead(400); res.end(JSON.stringify({ error: 'No clone path.' })); return; }
@@ -251,7 +296,7 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end('{"ok":true}');
     });
-  } else if (req.url === '/api/open-ide' && req.method === 'POST') {
+  } else if (pathname === '/api/open-ide' && req.method === 'POST') {
     handlePost(req, res, (data) => {
       const { cmd, clonePath } = data;
       const ide = installedIDEs.find(i => i.cmd === cmd);
@@ -263,8 +308,21 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
     });
-  } else if (req.url.startsWith('/public/') && req.method === 'GET') {
-    const filePath = join(PROJECT_DIR, req.url);
+  } else if (pathname === '/api/period' && req.method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ period: readPeriod() }));
+  } else if (pathname === '/api/period' && req.method === 'POST') {
+    handlePost(req, res, (data) => {
+      if (!writePeriod(data.period)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid period' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"ok":true}');
+    });
+  } else if (pathname.startsWith('/public/') && req.method === 'GET') {
+    const filePath = join(PROJECT_DIR, pathname);
     if (!filePath.startsWith(join(PROJECT_DIR, 'public'))) {
       res.writeHead(403); res.end('Forbidden'); return;
     }

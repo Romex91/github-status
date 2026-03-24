@@ -31,9 +31,8 @@ export async function fetchReviewPRs(log) {
   return prs;
 }
 
-export async function fetchMentionedPRs(log) {
-  log('Fetching PRs I was mentioned in (last 30 days)...', 'info');
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+export async function fetchMentionedPRs(log, since) {
+  log(`Fetching PRs I was mentioned in (since ${since})...`, 'info');
   const raw = await gh('api', `search/issues?q=mentions:@me+type:pr+updated:>${since}&per_page=100&sort=updated&order=desc`);
   const data = JSON.parse(raw);
   const prs = data.items.map(item => ({
@@ -64,9 +63,8 @@ export async function fetchAssignedIssues(log) {
   return issues;
 }
 
-export async function fetchMentionedIssues(log) {
-  log('Fetching issues I was mentioned in (last 30 days)...', 'info');
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+export async function fetchMentionedIssues(log, since) {
+  log(`Fetching issues I was mentioned in (since ${since})...`, 'info');
   const raw = await gh('api', `search/issues?q=mentions:@me+type:issue+state:open+updated:>${since}&per_page=100&sort=updated&order=desc`);
   const data = JSON.parse(raw);
   const issues = data.items.map(item => ({
@@ -95,6 +93,38 @@ export async function fetchCreatedIssues(log) {
   return issues;
 }
 
+export async function fetchCommentedPRs(log, since) {
+  log(`Fetching PRs I commented on (since ${since})...`, 'info');
+  const raw = await gh('api', `search/issues?q=commenter:@me+type:pr+updated:>${since}&per_page=100&sort=updated&order=desc`);
+  const data = JSON.parse(raw);
+  const prs = data.items.map(item => ({
+    title: item.title,
+    html_url: item.html_url,
+    repo: item.repository_url.split('/').slice(-2).join('/'),
+    number: item.number,
+    author: item.user.login,
+    updated_at: item.updated_at,
+    state: item.pull_request?.merged_at ? 'merged' : item.state,
+  }));
+  log(`Found ${prs.length} commented PRs`, 'success');
+  return prs;
+}
+
+export async function fetchCommentedIssues(log, since) {
+  log(`Fetching issues I commented on (since ${since})...`, 'info');
+  const raw = await gh('api', `search/issues?q=commenter:@me+type:issue+updated:>${since}&per_page=100&sort=updated&order=desc`);
+  const data = JSON.parse(raw);
+  const issues = data.items.map(item => ({
+    title: item.title,
+    html_url: item.html_url,
+    repo: item.repository_url.split('/').slice(-2).join('/'),
+    number: item.number,
+    updated_at: item.updated_at,
+  }));
+  log(`Found ${issues.length} commented issues`, 'success');
+  return issues;
+}
+
 export async function fetchIssueDetails(repo, number, signal) {
   const raw = await gh('issue', 'view', String(number), '--repo', repo,
     '--json', 'comments,labels,body,assignees', signal);
@@ -109,12 +139,14 @@ export async function fetchPRSummary(repo, number, signal) {
 
 export async function fetchPRPromptData(repo, number, signal) {
   const [owner, name] = repo.split('/');
-  const threadsQuery = `{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){pullRequest(number:${number}){reviewThreads(first:100){nodes{isOutdated,comments(first:100){nodes{databaseId,path,createdAt,body,author{login},replyTo{databaseId},line,originalLine,diffHunk}}}}}}}`;
+  const threadsQuery = `{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){pullRequest(number:${number}){url,reviewThreads(first:100){nodes{isOutdated,comments(first:100){nodes{databaseId,path,createdAt,body,author{login},replyTo{databaseId},line,originalLine,diffHunk}}}}}}}`;
   const [diffRaw, threadsRaw] = await Promise.all([
     gh('pr', 'diff', String(number), '--repo', repo, signal),
     gh('api', 'graphql', '-f', `query=${threadsQuery}`, signal),
   ]);
-  const threads = JSON.parse(threadsRaw).data.repository.pullRequest.reviewThreads.nodes;
+  const prData = JSON.parse(threadsRaw).data.repository.pullRequest;
+  const prUrl = prData.url;
+  const threads = prData.reviewThreads.nodes;
   const reviewComments = [];
   for (const thread of threads) {
     for (const c of thread.comments.nodes) {
@@ -129,6 +161,7 @@ export async function fetchPRPromptData(repo, number, signal) {
         isOutdated: thread.isOutdated,
         line: isRoot ? (c.line || c.originalLine) : null,
         diffHunk: isRoot ? c.diffHunk : null,
+        url: `${prUrl}#discussion_r${c.databaseId}`,
       });
     }
   }

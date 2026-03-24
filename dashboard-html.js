@@ -70,7 +70,7 @@ export const INDEX_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssues, mentionedIssues, createdIssues, date, updateInfo, { repoColorMap, installedIDEs }) {
+export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssues, mentionedPRs, commentedPRs, mentionedIssues, commentedIssues, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername }) {
   function repoColor(repoName) {
     return repoColorMap[repoName] || '#8b949e';
   }
@@ -138,13 +138,46 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
     </div>`;
   }
 
+  function correspondenceStatusCell(item, globalIndex) {
+    if (item.fetchError) {
+      return `<td class="status-col status-bad">Fetch failed: ${escapeHtml(item.fetchError)}</td>`;
+    }
+    return `<td class="status-col" id="status-${globalIndex}">
+                    <span class="status-text">waiting...</span>
+                    <div class="correspondence-citations" id="corr-${globalIndex}"></div>
+                    <br><span id="inline-actions-${globalIndex}"></span><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
+                    <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
+                </td>`;
+  }
+
+  function correspondenceRow(item, includeAuthor, globalIndex, includeState) {
+    const repoShort = item.repo.split('/').pop();
+    const authorSpan = includeAuthor ? ` <span class="author">@${escapeHtml(item.author)}</span>` : '';
+    const stateSpan = includeState ? stateBadge(item.state) : '';
+    const color = repoColor(repoShort);
+    return `            <tr>
+                <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
+                <td class="title-col" colspan="2"><a href="${escapeHtml(item.html_url)}">#${item.number} ${escapeHtml(item.title)}</a>${authorSpan}${stateSpan}</td>
+                ${correspondenceStatusCell(item, globalIndex)}
+                <td class="ci-col"></td>
+                <td class="days-col days-${daysClass(item.days)}">${item.days}d</td>
+            </tr>`;
+  }
+
+  const periodLabels = { '7d': '7 days', '30d': '30 days', '90d': '3 months', 'all': 'All time' };
+  const periodOptions = ['7d', '30d', '90d', 'all'].map(v =>
+    `<option value="${v}"${v === period ? ' selected' : ''}>${periodLabels[v]}</option>`
+  ).join('');
+
   let idx = 0;
   const myRows = myPRs.map(pr => prRow(pr, false, idx++, false)).join('\n');
   const reviewRows = reviewPRs.map(pr => prRow(pr, true, idx++, false)).join('\n');
-  const mentionedRows = mentionedPRs.map(pr => prRow(pr, true, idx++, true)).join('\n');
   const assignedIssueRows = assignedIssues.map(i => issueRow(i, idx++)).join('\n');
-  const mentionedIssueRows = mentionedIssues.map(i => issueRow(i, idx++)).join('\n');
   const createdIssueRows = createdIssues.map(i => issueRow(i, idx++)).join('\n');
+  const mentionedPRRows = mentionedPRs.map(pr => correspondenceRow(pr, true, idx++, true)).join('\n');
+  const commentedPRRows = commentedPRs.map(pr => correspondenceRow(pr, true, idx++, true)).join('\n');
+  const mentionedIssueRows = mentionedIssues.map(i => correspondenceRow(i, false, idx++, false)).join('\n');
+  const commentedIssueRows = commentedIssues.map(i => correspondenceRow(i, false, idx++, false)).join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -240,14 +273,34 @@ export function buildDashboardHtml(myPRs, reviewPRs, mentionedPRs, assignedIssue
         .update-popup { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; z-index: 200; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; font-size: 12px; }
         .update-popup code { background: #21262d; padding: 2px 6px; border-radius: 3px; color: #c9d1d9; display: block; margin-top: 8px; }
         .update-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 199; }
+        .period-select { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 3px; padding: 2px 6px; font-family: inherit; font-size: 12px; margin-left: 8px; cursor: pointer; }
+        .period-select:hover { border-color: #58a6ff; }
+        .nav-tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 1px solid #21262d; }
+        .nav-tab { color: #8b949e; text-decoration: none; padding: 8px 16px; font-size: 13px; border-bottom: 2px solid transparent; cursor: pointer; }
+        .nav-tab:hover { color: #c9d1d9; }
+        .nav-tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .correspondence-citations { margin-top: 4px; font-size: 11px; }
+        .correspondence-citations .corr-entry { margin-bottom: 4px; line-height: 1.5; }
+        .correspondence-citations .corr-q { color: #d29922; }
+        .correspondence-citations .corr-a { color: #3fb950; }
+        .correspondence-citations .corr-no-answer { color: #f85149; }
+        .correspondence-citations a { color: inherit; text-decoration: underline; }
     </style>
 </head>
 <body>
     <script>(function(){var o=console.error;function banner(){if(document.body&&!document.getElementById('_err')){var d=document.createElement('div');d.id='_err';d.style.cssText='background:#3d1f1f;color:#f85149;padding:6px 12px;font-size:12px;font-family:monospace;position:sticky;top:0;z-index:999;border-bottom:1px solid #f85149';d.textContent='There are errors in dev console';document.body.prepend(d)}}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
     ${updateHtml}
-    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
+    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span id="period-wrapper" style="display:none"><select class="period-select" onchange="fetch('/api/period',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period:this.value})}).then(function(){location.reload()})">${periodOptions}</select></span> <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
+    <div class="nav-tabs">
+        <span class="nav-tab active" data-tab="prs" onclick="switchTab('prs')">Pull Requests</span>
+        <span class="nav-tab" data-tab="issues" onclick="switchTab('issues')">Issues</span>
+        <span class="nav-tab" data-tab="correspondence" onclick="switchTab('correspondence')">Correspondence</span>
+    </div>
     <div class="fold-controls"><a onclick="foldAll()">Fold all</a><a onclick="unfoldAll()">Unfold all</a></div>
 
+    <div id="tab-prs" class="tab-panel active">
     <h1 class="section-heading">Pull Requests</h1>
 
     <h2 onclick="toggleFold(this)">My Open PRs (${myPRs.length})</h2>
@@ -285,25 +338,9 @@ ${reviewRows}
         </tbody>
     </table>
     <hr class="subdivider">
+    </div>
 
-    <h2 onclick="toggleFold(this)">PRs I Was Mentioned In (${mentionedPRs.length})</h2>
-    <table>
-        <thead>
-            <tr>
-                <th class="repo-col">Repo</th>
-                <th class="title-col">Title</th>
-                <th class="branch-col">Branch</th>
-                <th class="status-col">AI-Status</th>
-                <th class="ci-col">CI</th>
-                <th class="days-col">Days</th>
-            </tr>
-        </thead>
-        <tbody>
-${mentionedRows}
-        </tbody>
-    </table>
-    <hr class="subdivider">
-
+    <div id="tab-issues" class="tab-panel">
     <h1 class="section-heading">Issues</h1>
 
     <h2 onclick="toggleFold(this)">Issues Assigned to Me (${assignedIssues.length})</h2>
@@ -320,24 +357,6 @@ ${mentionedRows}
         </thead>
         <tbody>
 ${assignedIssueRows}
-        </tbody>
-    </table>
-    <hr class="subdivider">
-
-    <h2 onclick="toggleFold(this)">Issues I Was Mentioned In (${mentionedIssues.length})</h2>
-    <table>
-        <thead>
-            <tr>
-                <th class="repo-col">Repo</th>
-                <th class="title-col">Title</th>
-                <th class="branch-col"></th>
-                <th class="status-col">AI-Status</th>
-                <th class="ci-col"></th>
-                <th class="days-col">Days</th>
-            </tr>
-        </thead>
-        <tbody>
-${mentionedIssueRows}
         </tbody>
     </table>
     <hr class="subdivider">
@@ -359,21 +378,116 @@ ${createdIssueRows}
         </tbody>
     </table>
     <hr class="subdivider">
+    </div>
+
+    <div id="tab-correspondence" class="tab-panel">
+    <h1 class="section-heading">Correspondence</h1>
+
+    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)} in PRs (${mentionedPRs.length})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th class="repo-col">Repo</th>
+                <th class="title-col" colspan="2">Title</th>
+                <th class="status-col">AI-Status</th>
+                <th class="ci-col"></th>
+                <th class="days-col">Days</th>
+            </tr>
+        </thead>
+        <tbody>
+${mentionedPRRows}
+        </tbody>
+    </table>
+    <hr class="subdivider">
+
+    <h2 onclick="toggleFold(this)">My comments PRs (${commentedPRs.length})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th class="repo-col">Repo</th>
+                <th class="title-col" colspan="2">Title</th>
+                <th class="status-col">AI-Status</th>
+                <th class="ci-col"></th>
+                <th class="days-col">Days</th>
+            </tr>
+        </thead>
+        <tbody>
+${commentedPRRows}
+        </tbody>
+    </table>
+    <hr class="subdivider">
+
+    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)} in Issues (${mentionedIssues.length})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th class="repo-col">Repo</th>
+                <th class="title-col" colspan="2">Title</th>
+                <th class="status-col">AI-Status</th>
+                <th class="ci-col"></th>
+                <th class="days-col">Days</th>
+            </tr>
+        </thead>
+        <tbody>
+${mentionedIssueRows}
+        </tbody>
+    </table>
+    <hr class="subdivider">
+
+    <h2 onclick="toggleFold(this)">My comments Issues (${commentedIssues.length})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th class="repo-col">Repo</th>
+                <th class="title-col" colspan="2">Title</th>
+                <th class="status-col">AI-Status</th>
+                <th class="ci-col"></th>
+                <th class="days-col">Days</th>
+            </tr>
+        </thead>
+        <tbody>
+${commentedIssueRows}
+        </tbody>
+    </table>
+    <hr class="subdivider">
+    </div>
 
     <p class="footer">Generated ${date}</p>
 
     <script>
+        var _activeTab = localStorage.getItem('activeTab') || 'prs';
+
+        function switchTab(tab) {
+            // Save scroll position for current tab
+            sessionStorage.setItem('scrollY-' + _activeTab, window.scrollY);
+            _activeTab = tab;
+            localStorage.setItem('activeTab', tab);
+            document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+            document.querySelectorAll('.nav-tab').forEach(function(t) { t.classList.remove('active'); });
+            document.getElementById('tab-' + tab).classList.add('active');
+            document.querySelector('.nav-tab[data-tab="'+tab+'"]').classList.add('active');
+            document.getElementById('period-wrapper').style.display = tab === 'correspondence' ? '' : 'none';
+            // Restore scroll position for new tab
+            window.scrollTo(0, parseInt(sessionStorage.getItem('scrollY-' + tab)) || 0);
+        }
+
         function saveFoldState() {
-            var state = [];
-            document.querySelectorAll('h2').forEach(function(h) { state.push(h.classList.contains('folded')); });
-            localStorage.setItem('foldState', JSON.stringify(state));
+            document.querySelectorAll('.tab-panel').forEach(function(panel) {
+                var tab = panel.id.replace('tab-', '');
+                var state = [];
+                panel.querySelectorAll('h2').forEach(function(h) { state.push(h.classList.contains('folded')); });
+                localStorage.setItem('foldState-' + tab, JSON.stringify(state));
+            });
         }
         function restoreFoldState() {
-            var raw = localStorage.getItem('foldState');
-            if (!raw) return;
-            var state = JSON.parse(raw);
-            document.querySelectorAll('h2').forEach(function(h, i) {
-                if (state[i]) h.classList.add('folded');
+            document.querySelectorAll('.tab-panel').forEach(function(panel) {
+                var tab = panel.id.replace('tab-', '');
+                var raw = localStorage.getItem('foldState-' + tab);
+                if (!raw) return;
+                var state = JSON.parse(raw);
+                panel.querySelectorAll('h2').forEach(function(h, i) {
+                    if (state[i]) h.classList.add('folded');
+                });
             });
         }
         function toggleFold(el) {
@@ -381,14 +495,20 @@ ${createdIssueRows}
             saveFoldState();
         }
         function foldAll() {
-            document.querySelectorAll('h2').forEach(function(h) { h.classList.add('folded'); });
+            var panel = document.getElementById('tab-' + _activeTab);
+            panel.querySelectorAll('h2').forEach(function(h) { h.classList.add('folded'); });
             saveFoldState();
         }
         function unfoldAll() {
-            document.querySelectorAll('h2').forEach(function(h) { h.classList.remove('folded'); });
+            var panel = document.getElementById('tab-' + _activeTab);
+            panel.querySelectorAll('h2').forEach(function(h) { h.classList.remove('folded'); });
             saveFoldState();
         }
         restoreFoldState();
+        switchTab(_activeTab);
+        window.addEventListener('beforeunload', function() {
+            sessionStorage.setItem('scrollY-' + _activeTab, window.scrollY);
+        });
 
         var _clonePaths = {};
         function inlineChat(index) {
@@ -556,13 +676,27 @@ ${createdIssueRows}
             if (phaseTimers[d.index]) { clearInterval(phaseTimers[d.index]); delete phaseTimers[d.index]; }
             var cell = document.getElementById('status-' + d.index);
             var logDiv = document.getElementById('ai-log-' + d.index);
-            logDiv.textContent += '\\\\n--- Result ---\\\\n' + JSON.stringify({statusText: d.statusText, statusClass: d.statusClass}, null, 2);
+            logDiv.textContent += '\\\\n--- Result ---\\\\n' + JSON.stringify({statusText: d.statusText, statusClass: d.statusClass, correspondence: d.correspondence}, null, 2);
             var btn = cell.querySelector('.copy-prompt');
             if (btn) btn.setAttribute('data-preview', logDiv.textContent.slice(0, 500) + (logDiv.textContent.length > 500 ? '...' : ''));
             var statusSpan = cell.querySelector('.status-text');
             statusSpan.className = 'status-text';
             statusSpan.textContent = d.statusText;
             cell.className = 'status-col status-' + d.statusClass;
+            // Render correspondence citations
+            var corrDiv = document.getElementById('corr-' + d.index);
+            if (corrDiv && d.correspondence && d.correspondence.length) {
+                var html = '';
+                for (var i = 0; i < d.correspondence.length; i++) {
+                    var c = d.correspondence[i];
+                    var qText = (c.question || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    var aText = (c.answer || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    var qHtml = c.questionUrl ? '<a href="' + c.questionUrl + '" target="_blank">' + qText + '</a>' : qText;
+                    var aHtml = c.answer ? (c.answerUrl ? '<a href="' + c.answerUrl + '" target="_blank">' + aText + '</a>' : aText) : '<span class="corr-no-answer">No response yet</span>';
+                    html += '<div class="corr-entry"><span class="corr-q">Q: "' + qHtml + '"</span> → <span class="corr-a">A: ' + (c.answer ? '"' + aHtml + '"' : aHtml) + '</span></div>';
+                }
+                corrDiv.innerHTML = html;
+            }
         });
 
         onSSE(es, 'ai-error', function() {});
