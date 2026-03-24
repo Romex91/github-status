@@ -242,8 +242,8 @@ const server = http.createServer((req, res) => {
       if (action === 'checkout' && branch) {
         await runCmd('git', ['fetch', 'origin'], { cwd: clonePath });
         await runCmd('git', ['checkout', branch], { cwd: clonePath });
-      } else if (action === 'pull') {
-        await runCmd('git', ['pull'], { cwd: clonePath });
+      } else if (action === 'pull' && branch) {
+        await runCmd('git', ['pull', 'origin', branch], { cwd: clonePath });
       } else {
         res.writeHead(400); res.end(JSON.stringify({ error: `Unknown sync action: ${action}` })); return;
       }
