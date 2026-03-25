@@ -382,7 +382,7 @@ ${createdIssueRows}
     <div id="tab-correspondence" class="tab-panel">
     <h1 class="section-heading">Correspondence</h1>
 
-    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)} in PRs (${mentionedPRs.length})</h2>
+    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)} mentioned in PRs (${mentionedPRs.length})</h2>
     <table>
         <thead>
             <tr>
@@ -399,7 +399,7 @@ ${mentionedPRRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="toggleFold(this)">My comments PRs (${commentedPRs.length})</h2>
+    <h2 onclick="toggleFold(this)">My comments in PRs of other people (${commentedPRs.length})</h2>
     <table>
         <thead>
             <tr>
@@ -416,7 +416,7 @@ ${commentedPRRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)} in Issues (${mentionedIssues.length})</h2>
+    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)} mentioned in Issues (${mentionedIssues.length})</h2>
     <table>
         <thead>
             <tr>
@@ -433,7 +433,7 @@ ${mentionedIssueRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="toggleFold(this)">My comments Issues (${commentedIssues.length})</h2>
+    <h2 onclick="toggleFold(this)">My comments in Issues of other people (${commentedIssues.length})</h2>
     <table>
         <thead>
             <tr>
