@@ -26,7 +26,7 @@ export const INDEX_HTML = `<!DOCTYPE html>
 </head>
 <body>
     <script>(function(){var o=console.error;function banner(){var el=document.getElementById('_err');if(el)el.style.display=''}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
-    <h1>GitHub Status</h1>
+    <h1>GitHub Status<span id="_err" style="display:none;font-size:14px;margin-left:12px;color:#f85149">There are errors in dev console!!!</span></h1>
     <div id="logs"></div>
     <script>
         var logs = document.getElementById('logs');
@@ -313,7 +313,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
 <body>
     <script>(function(){var o=console.error;function banner(){var el=document.getElementById('_err');if(el)el.style.display=''}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
     ${updateHtml}
-    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
+    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a><span id="_err" style="display:none"> · <span style="color:#f85149;cursor:pointer" onclick="alert('Check the browser dev console for error details')" title="Check dev console for details">There are errors in dev console!!!</span></span></span></h1>
     <div class="nav-tabs">
         <span class="nav-tab active" data-tab="prs" onclick="switchTab('prs')">Pull Requests</span>
         <span class="nav-tab" data-tab="issues" onclick="switchTab('issues')">Issues</span>
