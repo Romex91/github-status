@@ -24,7 +24,7 @@ export async function fetchReviewPRs(log) {
     html_url: item.html_url,
     repo: item.repository_url.split('/').slice(-2).join('/'),
     number: item.number,
-    author: item.user.login,
+    author: item.user?.login || 'unknown',
     updated_at: item.updated_at,
   }));
   log(`Found ${prs.length} PRs awaiting review`, 'success');
@@ -40,7 +40,7 @@ export async function fetchMentionedPRs(log, since) {
     html_url: item.html_url,
     repo: item.repository_url.split('/').slice(-2).join('/'),
     number: item.number,
-    author: item.user.login,
+    author: item.user?.login || 'unknown',
     updated_at: item.updated_at,
     state: item.pull_request?.merged_at ? 'merged' : item.state,
   }));
