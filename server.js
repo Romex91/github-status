@@ -133,7 +133,7 @@ async function handleStatusStream(req, res) {
     const since = periodToSince(period);
     const sinceQuery = since || '2000-01-01';
 
-    const [myPRs, reviewPRs, rawMentionedPRs, username, assignedIssues, rawMentionedIssues, rawCreatedIssues, rawCommentedPRs, rawCommentedIssues, updateInfo] = await Promise.all([
+    const [myPRs, reviewPRs, rawMentionedPRs, username, assignedIssues, rawMentionedIssues, rawCreatedIssues, rawCommentedPRs, rawCommentedIssues, updateInfo, cloneIdx] = await Promise.all([
       fetchMyPRs(log),
       fetchReviewPRs(log),
       fetchMentionedPRs(log, sinceQuery),
@@ -144,8 +144,10 @@ async function handleStatusStream(req, res) {
       fetchCommentedPRs(log, sinceQuery),
       fetchCommentedIssues(log, sinceQuery),
       checkForUpdates(),
+      buildCloneIndex(log),
     ]);
     ghUsername = username;
+    cloneIndex = cloneIdx;
 
     // Deduplicate: remove mentioned PRs already in my PRs or review PRs
     const existingUrls = new Set([...myPRs, ...reviewPRs].map(pr => pr.html_url));
@@ -191,10 +193,6 @@ async function handleStatusStream(req, res) {
     // Store all items for phase 2 (AI streaming)
     const allItems = [...allPRs, ...allIssues, ...allCorrespondence];
     pendingPRData = allItems;
-
-    // Build clone index once for all repo-scan lookups
-    log('Scanning local git repos...', 'info');
-    cloneIndex = await buildCloneIndex();
 
     // Update persistent repo color assignments
     const allRepoNames = [...new Set(allItems.map(i => i.repo.split('/').pop()))];

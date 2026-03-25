@@ -60,8 +60,9 @@ function readRef(gitDir, ref) {
  * current branch, local/remote refs, and dirty status.
  * Returns a Map<repoNameLower, CloneInfo[]> for instant lookup.
  */
-export async function buildCloneIndex() {
+export async function buildCloneIndex(log) {
   const home = homedir();
+  if (log) log('Scanning local git repos...', 'info');
   if (!existsSync(home)) return new Map();
   const entries = readdirSync(home, { withFileTypes: true });
 
@@ -92,6 +93,8 @@ export async function buildCloneIndex() {
     const remoteRepo = extractRepoFromRemote(originUrl);
     if (!remoteRepo) continue;
 
+    if (log) log(`  scanning ${dir.replace(home, '~')} → ${remoteRepo}`, 'info');
+
     const currentBranch = readCurrentBranch(gitDir);
     const status = await runCmd('git', ['status', '--porcelain'], { cwd: dir });
     const dirty = !!status;
@@ -102,7 +105,9 @@ export async function buildCloneIndex() {
     index.get(key).push({ path: dir, currentBranch, dirty, changedFiles });
   }
 
-  console.log(`Clone index: ${gitDirs.length} repos scanned, ${index.size} unique remotes`);
+  const summary = `Clone index: ${gitDirs.length} repos scanned, ${index.size} unique remotes`;
+  console.log(summary);
+  if (log) log(summary, 'info');
   return index;
 }
 

@@ -25,7 +25,7 @@ export const INDEX_HTML = `<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <script>(function(){var o=console.error;function banner(){if(document.body&&!document.getElementById('_err')){var d=document.createElement('div');d.id='_err';d.style.cssText='background:#3d1f1f;color:#f85149;padding:6px 12px;font-size:12px;font-family:monospace;position:sticky;top:0;z-index:999;border-bottom:1px solid #f85149';d.textContent='There are errors in dev console';document.body.prepend(d)}}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
+    <script>(function(){var o=console.error;function banner(){var el=document.getElementById('_err');if(el)el.style.display=''}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
     <h1>GitHub Status</h1>
     <div id="logs"></div>
     <script>
@@ -187,6 +187,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
   const visibleCommentedPRs = commentedPRs.filter(p => !archivedSet.has(p.html_url)).length;
   const visibleMentionedIssues = mentionedIssues.filter(i => !archivedSet.has(i.html_url)).length;
   const visibleCommentedIssues = commentedIssues.filter(i => !archivedSet.has(i.html_url)).length;
+  const totalCorrespondence = visibleMentionedPRs + visibleCommentedPRs + visibleMentionedIssues + visibleCommentedIssues;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -310,13 +311,13 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     </style>
 </head>
 <body>
-    <script>(function(){var o=console.error;function banner(){if(document.body&&!document.getElementById('_err')){var d=document.createElement('div');d.id='_err';d.style.cssText='background:#3d1f1f;color:#f85149;padding:6px 12px;font-size:12px;font-family:monospace;position:sticky;top:0;z-index:999;border-bottom:1px solid #f85149';d.textContent='There are errors in dev console';document.body.prepend(d)}}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
+    <script>(function(){var o=console.error;function banner(){var el=document.getElementById('_err');if(el)el.style.display=''}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
     ${updateHtml}
     <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
     <div class="nav-tabs">
         <span class="nav-tab active" data-tab="prs" onclick="switchTab('prs')">Pull Requests</span>
         <span class="nav-tab" data-tab="issues" onclick="switchTab('issues')">Issues</span>
-        <span class="nav-tab" data-tab="correspondence" onclick="switchTab('correspondence')">Correspondence</span>
+        <span class="nav-tab" data-tab="correspondence" onclick="switchTab('correspondence')">Correspondence (${totalCorrespondence})</span>
     </div>
     <div class="fold-controls"><a onclick="foldAll()">Fold all</a><a onclick="unfoldAll()">Unfold all</a></div>
 
@@ -594,13 +595,20 @@ ${commentedIssueRows}
             var section = row.closest('table').previousElementSibling;
             while (section && section.tagName !== 'H2') section = section.previousElementSibling;
             if (!section) return;
-            var m = section.textContent.match(/\\((\d+)\\)/);
+            var m = section.textContent.match(/\\((\\d+)\\)/);
             if (m) {
                 var newCount = Math.max(0, parseInt(m[1]) + delta);
                 section.childNodes.forEach(function(n) {
-                    if (n.nodeType === 3) n.textContent = n.textContent.replace(/\\(\d+\\)/, '(' + newCount + ')');
+                    if (n.nodeType === 3) n.textContent = n.textContent.replace(/\\(\\d+\\)/, '(' + newCount + ')');
                 });
             }
+        }
+
+        function updateCorrespondenceTab() {
+            var tab = document.querySelector('span.nav-tab[data-tab="correspondence"]');
+            if (!tab) return;
+            var count = document.querySelectorAll('#tab-correspondence tr[data-idx]:not([data-archived])').length;
+            tab.textContent = tab.textContent.replace(/\\((\\d+)\\)/, '(' + count + ')');
         }
 
         function updateArchiveInfo(delta) {
@@ -618,6 +626,7 @@ ${commentedIssueRows}
             row.setAttribute('data-archived', '1');
             row.style.display = 'none';
             updateHeadingCount(row, -1);
+            updateCorrespondenceTab();
             updateArchiveInfo(1);
             fetch('/api/correspondence-archive', {
                 method: 'POST',
@@ -686,6 +695,7 @@ ${commentedIssueRows}
                     }
                 });
                 updateArchiveInfo(-1);
+                updateCorrespondenceTab();
                 // Re-open overlay if more items remain
                 if (d.archivedCount > 0) showArchived();
             });
