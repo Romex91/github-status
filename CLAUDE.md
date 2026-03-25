@@ -1,5 +1,9 @@
 # GitHub Status Dashboard
 
+## Server Restart
+
+Use `bash restart.sh` to restart the server after code changes.
+
 ## Error Handling
 
 **Principle: KISS.** Handlers only contain happy-path code. All errors go to `showError()` which does `console.error` + shows a sticky banner "There are errors in dev console". No inline error rendering, no retry buttons, no per-handler error logic.

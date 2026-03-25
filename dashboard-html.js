@@ -70,9 +70,11 @@ export const INDEX_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssues, mentionedPRs, commentedPRs, mentionedIssues, commentedIssues, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls, autoUnarchivedUrls }) {
+export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssues, mentionedPRs, commentedPRs, mentionedIssues, commentedIssues, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls, autoUnarchivedUrls, unimportantUrls, markedImportantUrls }) {
   const archivedSet = new Set(Object.keys(archivedUrls || {}));
   const autoUnarchivedSet = new Set(autoUnarchivedUrls || []);
+  const unimportantSet = new Set(Object.keys(unimportantUrls || {}));
+  const markedImportantSet = new Set(markedImportantUrls || []);
   function repoColor(repoName) {
     return repoColorMap[repoName] || '#8b949e';
   }
@@ -159,11 +161,17 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     const stateSpan = includeState ? stateBadge(item.state) : '';
     const color = repoColor(repoShort);
     const isArchived = archivedSet.has(item.html_url);
+    const isUnimportant = !isArchived && unimportantSet.has(item.html_url);
     const urlAttr = escapeHtml(item.html_url).replace(/"/g, '&quot;');
+    const isMarkedImportant = markedImportantSet.has(item.html_url);
     const unarchivedBadge = autoUnarchivedSet.has(item.html_url) ? ' <span class="unarchived-badge">unarchived: new comments</span>' : '';
-    return `            <tr data-url="${urlAttr}"${isArchived ? ' data-archived="1" style="display:none"' : ''}>
+    const importantBadge = isMarkedImportant ? ' <span class="important-badge">marked as important</span>' : '';
+    const hidden = isArchived || isUnimportant;
+    const attrs = isArchived ? ' data-archived="1"' : isUnimportant ? ' data-unimportant="1"' : '';
+    const miAttr = isMarkedImportant ? ' data-marked-important="1"' : '';
+    return `            <tr data-url="${urlAttr}"${attrs}${miAttr}${hidden ? ' style="display:none"' : ''}>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
-                <td class="title-col" colspan="2"><a href="${escapeHtml(item.html_url)}">#${item.number} ${escapeHtml(item.title)}</a>${authorSpan}${stateSpan}${unarchivedBadge}</td>
+                <td class="title-col" colspan="2"><a href="${escapeHtml(item.html_url)}">#${item.number} ${escapeHtml(item.title)}</a>${authorSpan}${stateSpan}${unarchivedBadge}${importantBadge}</td>
                 ${correspondenceStatusCell(item, globalIndex)}
                 <td class="ci-col"></td>
                 <td class="days-col days-${daysClass(item.days)}">${item.days}d</td>
@@ -185,10 +193,11 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
   const mentionedIssueRows = mentionedIssues.map(i => correspondenceRow(i, false, idx++, false)).join('\n');
   const commentedIssueRows = commentedIssues.map(i => correspondenceRow(i, false, idx++, false)).join('\n');
 
-  const visibleMentionedPRs = mentionedPRs.filter(p => !archivedSet.has(p.html_url)).length;
-  const visibleCommentedPRs = commentedPRs.filter(p => !archivedSet.has(p.html_url)).length;
-  const visibleMentionedIssues = mentionedIssues.filter(i => !archivedSet.has(i.html_url)).length;
-  const visibleCommentedIssues = commentedIssues.filter(i => !archivedSet.has(i.html_url)).length;
+  const hiddenSet = new Set([...archivedSet, ...unimportantSet]);
+  const visibleMentionedPRs = mentionedPRs.filter(p => !hiddenSet.has(p.html_url)).length;
+  const visibleCommentedPRs = commentedPRs.filter(p => !hiddenSet.has(p.html_url)).length;
+  const visibleMentionedIssues = mentionedIssues.filter(i => !hiddenSet.has(i.html_url)).length;
+  const visibleCommentedIssues = commentedIssues.filter(i => !hiddenSet.has(i.html_url)).length;
   const totalCorrespondence = visibleMentionedPRs + visibleCommentedPRs + visibleMentionedIssues + visibleCommentedIssues;
 
   return `<!DOCTYPE html>
@@ -253,6 +262,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
 
         .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
         .unarchived-badge { font-size: 10px; color: #d29922; border: 1px solid #d29922; border-radius: 3px; padding: 1px 4px; margin-left: 6px; }
+        .important-badge { font-size: 10px; color: #58a6ff; border: 1px solid #58a6ff; border-radius: 3px; padding: 1px 4px; margin-left: 6px; }
         .status-text { white-space: pre-wrap; }
         .status-text.loading { color: #d29922; }
         .copy-prompt { cursor: pointer; color: #8b949e; font-size: 10px; position: relative; padding: 2px 8px; margin-right: 6px; font-family: inherit; display: inline-block; }
@@ -410,6 +420,9 @@ ${createdIssueRows}
     <div id="archive-info" style="display:${archivedSet.size > 0 ? '' : 'none'}">
         <span id="archive-count">${archivedSet.size}</span> archived — <a onclick="showArchived()">manage</a>
     </div>
+    <div id="unimportant-info" style="display:${unimportantSet.size > 0 ? '' : 'none'}">
+        <span id="unimportant-count">${unimportantSet.size}</span> unimportant — <a onclick="showUnimportant()">manage</a>
+    </div>
 
     <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)} mentioned in PRs (${visibleMentionedPRs})</h2>
     <table>
@@ -478,6 +491,7 @@ ${commentedIssueRows}
         </tbody>
     </table>
     <hr class="subdivider">
+
     </div>
 
     <p class="footer">Generated ${date}</p>
@@ -611,16 +625,120 @@ ${commentedIssueRows}
         function updateCorrespondenceTab() {
             var tab = document.querySelector('span.nav-tab[data-tab="correspondence"]');
             if (!tab) return;
-            var count = document.querySelectorAll('#tab-correspondence tr[data-idx]:not([data-archived])').length;
+            var count = Array.from(document.querySelectorAll('#tab-correspondence tr[data-idx]')).filter(function(r) { return r.style.display !== 'none'; }).length;
             tab.textContent = tab.textContent.replace(/\\((\\d+)\\)/, '(' + count + ')');
         }
 
-        function updateArchiveInfo(delta) {
-            var countEl = document.getElementById('archive-count');
-            var infoEl = document.getElementById('archive-info');
+        function updateInfoCount(prefix, delta) {
+            var countEl = document.getElementById(prefix + '-count');
+            var infoEl = document.getElementById(prefix + '-info');
             var n = Math.max(0, parseInt(countEl.textContent) + delta);
             countEl.textContent = n;
             infoEl.style.display = n > 0 ? '' : 'none';
+            return n;
+        }
+
+        function showManagedPopup(opts) {
+            fetch(opts.apiUrl).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.error) throw new Error(d.error);
+                var existing = document.getElementById('archive-overlay');
+                if (existing) existing.remove();
+                var existingPopup = document.getElementById('archive-popup');
+                if (existingPopup) existingPopup.remove();
+
+                var overlay = document.createElement('div');
+                overlay.id = 'archive-overlay';
+                var popup = document.createElement('div');
+                popup.id = 'archive-popup';
+                overlay.onclick = function() { overlay.remove(); popup.remove(); };
+
+                var items = d[opts.dataKey];
+                var urls = Object.keys(items);
+                var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="color:#c9d1d9;font-size:14px;font-weight:600">' + opts.title + ' (' + urls.length + ')</span><span style="cursor:pointer;color:#8b949e;font-size:18px" onclick="document.getElementById(\\'archive-overlay\\').remove();document.getElementById(\\'archive-popup\\').remove()">\u00d7</span></div>';
+                if (urls.length === 0) {
+                    html += '<div style="color:#8b949e">No items.</div>';
+                } else {
+                    urls.forEach(function(url) {
+                        var entry = items[url];
+                        var title = (entry && entry.title) ? entry.title : (typeof entry === 'string' ? entry : url);
+                        var u = url.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                        html += '<div class="archive-item"><a href="' + u + '" target="_blank">' + title.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a><button class="unarchive-btn" onclick="' + opts.actionFn + '(\\'' + u.replace(/'/g,'&#39;') + '\\')">' + opts.buttonLabel + '</button></div>';
+                    });
+                }
+                popup.innerHTML = html;
+                document.body.appendChild(overlay);
+                document.body.appendChild(popup);
+            });
+        }
+
+        function restoreItem(url, opts) {
+            var ov = document.getElementById('archive-overlay');
+            var pp = document.getElementById('archive-popup');
+            if (ov) ov.remove();
+            if (pp) pp.remove();
+
+            fetch(opts.apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(opts.postBody(url))
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.error) throw new Error(d.error);
+                var rows = document.querySelectorAll('#tab-correspondence tr[data-url="' + url.replace(/"/g, '\\\\"') + '"]');
+                rows.forEach(function(row) {
+                    opts.attrs.forEach(function(a) { row.removeAttribute(a); });
+                    row.style.display = '';
+                    updateHeadingCount(row, 1);
+                    if (opts.onRow) opts.onRow(row);
+                    var idx = parseInt(row.getAttribute('data-idx'));
+                    if (!isNaN(idx) && !enqueued[idx]) {
+                        enqueued[idx] = true;
+                        pendingEnqueue.push(idx);
+                        if (!enqueueTimer) enqueueTimer = setTimeout(flushEnqueue, 50);
+                    }
+                });
+                updateInfoCount(opts.infoPrefix, -1);
+                updateCorrespondenceTab();
+                if (d[opts.remainingKey] > 0) opts.reopenFn();
+            });
+        }
+
+        function showArchived() {
+            showManagedPopup({ apiUrl: '/api/correspondence-archive', dataKey: 'archived', title: 'Archived items', actionFn: 'unarchiveItem', buttonLabel: 'unarchive' });
+        }
+        function showUnimportant() {
+            showManagedPopup({ apiUrl: '/api/correspondence-unimportant', dataKey: 'items', title: 'Unimportant items', actionFn: 'markImportant', buttonLabel: 'important' });
+        }
+
+        function unarchiveItem(url) {
+            restoreItem(url, {
+                apiUrl: '/api/correspondence-archive',
+                postBody: function(u) { return { url: u, action: 'unarchive' }; },
+                attrs: ['data-archived'],
+                infoPrefix: 'archive',
+                remainingKey: 'archivedCount',
+                reopenFn: showArchived,
+            });
+        }
+
+        function markImportant(url) {
+            restoreItem(url, {
+                apiUrl: '/api/correspondence-unimportant',
+                postBody: function(u) { return { url: u, action: 'mark-important' }; },
+                attrs: ['data-unimportant'],
+                infoPrefix: 'unimportant',
+                remainingKey: 'unimportantCount',
+                reopenFn: showUnimportant,
+                onRow: function(row) {
+                    row.setAttribute('data-marked-important', '1');
+                    var titleCol = row.querySelector('.title-col');
+                    if (titleCol && !titleCol.querySelector('.important-badge')) {
+                        var badge = document.createElement('span');
+                        badge.className = 'important-badge';
+                        badge.textContent = 'marked as important';
+                        titleCol.appendChild(badge);
+                    }
+                },
+            });
         }
 
         function archiveItem(url, el) {
@@ -634,7 +752,7 @@ ${commentedIssueRows}
             row.style.display = 'none';
             updateHeadingCount(row, -1);
             updateCorrespondenceTab();
-            updateArchiveInfo(1);
+            updateInfoCount('archive',1);
             fetch('/api/correspondence-archive', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -644,70 +762,7 @@ ${commentedIssueRows}
             });
         }
 
-        function showArchived() {
-            fetch('/api/correspondence-archive').then(function(r) { return r.json(); }).then(function(d) {
-                if (d.error) throw new Error(d.error);
-                var existing = document.getElementById('archive-overlay');
-                if (existing) existing.remove();
-                var existingPopup = document.getElementById('archive-popup');
-                if (existingPopup) existingPopup.remove();
 
-                var overlay = document.createElement('div');
-                overlay.id = 'archive-overlay';
-                var popup = document.createElement('div');
-                popup.id = 'archive-popup';
-                overlay.onclick = function() { overlay.remove(); popup.remove(); };
-
-                var urls = Object.keys(d.archived);
-                var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="color:#c9d1d9;font-size:14px;font-weight:600">Archived items (' + urls.length + ')</span><span style="cursor:pointer;color:#8b949e;font-size:18px" onclick="document.getElementById(\\'archive-overlay\\').remove();document.getElementById(\\'archive-popup\\').remove()">\u00d7</span></div>';
-                if (urls.length === 0) {
-                    html += '<div style="color:#8b949e">No archived items.</div>';
-                } else {
-                    urls.forEach(function(url) {
-                        var entry = d.archived[url];
-                        var title = (entry && entry.title) ? entry.title : (typeof entry === 'string' ? entry : url);
-                        var u = url.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-                        html += '<div class="archive-item"><a href="' + u + '" target="_blank">' + title.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a><button class="unarchive-btn" onclick="unarchiveItem(\\'' + u.replace(/'/g,'&#39;') + '\\')">unarchive</button></div>';
-                    });
-                }
-                popup.innerHTML = html;
-                document.body.appendChild(overlay);
-                document.body.appendChild(popup);
-            });
-        }
-
-        function unarchiveItem(url) {
-            // Close overlay first
-            var ov = document.getElementById('archive-overlay');
-            var pp = document.getElementById('archive-popup');
-            if (ov) ov.remove();
-            if (pp) pp.remove();
-
-            fetch('/api/correspondence-archive', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url, action: 'unarchive' })
-            }).then(function(r) { return r.json(); }).then(function(d) {
-                if (d.error) throw new Error(d.error);
-                // Show DOM row if it exists (same time period)
-                var rows = document.querySelectorAll('#tab-correspondence tr[data-url="' + url.replace(/"/g, '\\\\"') + '"]');
-                rows.forEach(function(row) {
-                    row.removeAttribute('data-archived');
-                    row.style.display = '';
-                    updateHeadingCount(row, 1);
-                    var idx = parseInt(row.getAttribute('data-idx'));
-                    if (!isNaN(idx) && !enqueued[idx]) {
-                        enqueued[idx] = true;
-                        pendingEnqueue.push(idx);
-                        if (!enqueueTimer) enqueueTimer = setTimeout(flushEnqueue, 50);
-                    }
-                });
-                updateArchiveInfo(-1);
-                updateCorrespondenceTab();
-                // Re-open overlay if more items remain
-                if (d.archivedCount > 0) showArchived();
-            });
-        }
 
         // Connect to AI status stream
         var es = new EventSource('/api/ai-stream');
@@ -848,33 +903,28 @@ ${commentedIssueRows}
                 archBtn.setAttribute('onclick', "archiveItem('" + urlEsc.replace(/'/g, '&#39;') + "', this)");
                 archBtn.innerHTML = 'ARCHIVE<span class="archive-tooltip">YOU WILL NOT SEE UPDATES FOR THIS PR!!!</span>';
             }
-        });
-
-        onSSE(es, 'ai-skip', function(d) {
-            var cell = document.getElementById('status-' + d.index);
-            if (!cell) return;
-            var row = cell.closest('tr');
-            if (!row) return;
-            row.style.display = 'none';
-            updateHeadingCount(row, -1);
-            updateCorrespondenceTab();
+            // AI says this item is unimportant — hide and update info (unless user marked it important)
+            if (d.autoArchive) {
+                var aiRow = cell.closest('tr');
+                if (aiRow && !aiRow.getAttribute('data-archived') && !aiRow.getAttribute('data-unimportant') && !aiRow.getAttribute('data-marked-important')) {
+                    aiRow.setAttribute('data-unimportant', '1');
+                    aiRow.style.display = 'none';
+                    updateHeadingCount(aiRow, -1);
+                    updateCorrespondenceTab();
+                    updateInfoCount('unimportant',1);
+                }
+            }
         });
 
         onSSE(es, 'ai-error', function() {});
 
-        onSSE(es, 'auto-unarchive', function(d) {
-            var rows = document.querySelectorAll('#tab-correspondence tr[data-url="' + d.url.replace(/"/g, '\\\\"') + '"]');
+        function handleNewComments(url, opts) {
+            var rows = document.querySelectorAll('#tab-correspondence tr[data-url="' + url.replace(/"/g, '\\\\"') + '"]');
             rows.forEach(function(row) {
-                row.removeAttribute('data-archived');
+                opts.attrs.forEach(function(a) { row.removeAttribute(a); });
                 row.style.display = '';
                 updateHeadingCount(row, 1);
-                var titleCol = row.querySelector('.title-col');
-                if (titleCol && !titleCol.querySelector('.unarchived-badge')) {
-                    var badge = document.createElement('span');
-                    badge.className = 'unarchived-badge';
-                    badge.textContent = 'unarchived: new comments';
-                    titleCol.appendChild(badge);
-                }
+                if (opts.onRow) opts.onRow(row);
                 var idx = parseInt(row.getAttribute('data-idx'));
                 if (!isNaN(idx) && !enqueued[idx]) {
                     enqueued[idx] = true;
@@ -882,8 +932,35 @@ ${commentedIssueRows}
                     if (!enqueueTimer) enqueueTimer = setTimeout(flushEnqueue, 50);
                 }
             });
-            updateArchiveInfo(-1);
+            updateInfoCount(opts.infoPrefix, -1);
             updateCorrespondenceTab();
+        }
+
+        onSSE(es, 'auto-unarchive', function(d) {
+            handleNewComments(d.url, {
+                attrs: ['data-archived'],
+                infoPrefix: 'archive',
+                onRow: function(row) {
+                    var titleCol = row.querySelector('.title-col');
+                    if (titleCol && !titleCol.querySelector('.unarchived-badge')) {
+                        var badge = document.createElement('span');
+                        badge.className = 'unarchived-badge';
+                        badge.textContent = 'unarchived: new comments';
+                        titleCol.appendChild(badge);
+                    }
+                },
+            });
+        });
+
+        onSSE(es, 'reset-unimportant', function(d) {
+            handleNewComments(d.url, {
+                attrs: ['data-unimportant', 'data-marked-important'],
+                infoPrefix: 'unimportant',
+                onRow: function(row) {
+                    var badge = row.querySelector('.important-badge');
+                    if (badge) badge.remove();
+                },
+            });
         });
 
         es.onerror = function() {

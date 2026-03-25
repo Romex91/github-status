@@ -163,7 +163,8 @@ export function buildPromptForPR(pr, ghUsername) {
 - Consider appropriate code change as implicit response. Mention in statusText
 - good: discussion resolved, my points addressed, or PR state makes it moot
 - warning: discussion ongoing, may need my input
-- bad: ${ghUsername} was asked something and haven't responded, or my comment was ignored`;
+- bad: ${ghUsername} was asked something and haven't responded, or my comment was ignored
+- autoArchive: set to true if ${ghUsername}'s involvement is trivial and not worth tracking. Examples: only approved with "LGTM", only left emoji reactions, only short acknowledgments like "thanks" or "looks good". If there is any meaningful conversation, code review feedback, or unresolved questions involving ${ghUsername}, set to false.`;
 
   const mentionedRules = correspondenceRules;
   const commentedRules = correspondenceRules;
@@ -180,7 +181,7 @@ export function buildPromptForPR(pr, ghUsername) {
   const isCorrespondence = pr.section === 'mentioned' || pr.section === 'commented-pr';
   const rules = pr.section === 'mentioned' ? mentionedRules : pr.section === 'commented-pr' ? commentedRules : standardRules;
   const returnShape = isCorrespondence
-    ? '{"statusText":"<description>","statusClass":"<good|warning|bad>","correspondence":[{"author":"<username>","text":"<comment summary>","url":"<comment URL>"}]}'
+    ? '{"statusText":"<description>","statusClass":"<good|warning|bad>","autoArchive":<true|false>,"correspondence":[{"author":"<username>","text":"<comment summary>","url":"<comment URL>"}]}'
     : '{"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>","ciUrl":"<failing CI URL or null>"}';
 
   return `You are a JSON API. Analyze this GitHub PR and return ONLY a single JSON object (no markdown fences, no explanation).
@@ -241,14 +242,15 @@ export function buildPromptForIssue(issue, ghUsername) {
 - If no response yet but issue is closed, note that it's resolved
 - good: discussion resolved, my points addressed, or issue closed
 - warning: discussion ongoing, may need my input
-- bad: ${ghUsername} was asked something and haven't responded, or my comment was ignored`;
+- bad: ${ghUsername} was asked something and haven't responded, or my comment was ignored
+- autoArchive: set to true if ${ghUsername}'s involvement is trivial and not worth tracking. Examples: only left emoji reactions, only short acknowledgments like "thanks" or "looks good". If there is any meaningful conversation or unresolved questions involving ${ghUsername}, set to false.`;
 
   const mentionedIssueRules = correspondenceIssueRules;
   const commentedIssueRules = correspondenceIssueRules;
 
   const rules = issue.section === 'mentioned-issue' ? mentionedIssueRules : issue.section === 'commented-issue' ? commentedIssueRules : standardRules;
   const returnShape = isCorrespondence
-    ? '{"statusText":"<description>","statusClass":"<good|warning|bad>","correspondence":[{"author":"<username>","text":"<comment summary>","url":"<comment URL>"}]}'
+    ? '{"statusText":"<description>","statusClass":"<good|warning|bad>","autoArchive":<true|false>,"correspondence":[{"author":"<username>","text":"<comment summary>","url":"<comment URL>"}]}'
     : '{"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>"}';
 
   return `You are a JSON API. Analyze this GitHub issue and return ONLY a single JSON object (no markdown fences, no explanation).
@@ -274,7 +276,7 @@ function buildContextForItem(item) {
 
 // === SSE: Phase 2 - Stream AI status generation per PR ===
 
-export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, claudeVersion, onEnqueueReady, archivedUrls, onAutoUnarchive, clearAutoUnarchived }) {
+export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, claudeVersion, onEnqueueReady, archivedUrls, onAutoUnarchive, clearAutoUnarchived, onMarkUnimportant, unimportantUrls, onResetUnimportant }) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -356,18 +358,6 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
         const myReviewComments = (promptData.reviewComments || []).some(rc => rc.user?.login === ghUsername);
         pr.iResponded = myComments || myReviews || myReviewComments;
       }
-      // Skip commented PRs where user's only interaction was approving
-      if (pr.section === 'commented-pr') {
-        const myComments = (summary.comments || []).filter(c => c.author?.login === ghUsername);
-        const myReviews = (summary.reviews || []).filter(r => r.author?.login === ghUsername);
-        const myReviewComments = (promptData.reviewComments || []).filter(rc => rc.user?.login === ghUsername);
-        const onlyApproved = myComments.length === 0 && myReviewComments.length === 0
-          && myReviews.length > 0 && myReviews.every(r => r.state === 'APPROVED' && !r.body?.trim());
-        if (onlyApproved) {
-          sendIfActive(index, 'ai-skip', { index });
-          return;
-        }
-      }
     }
 
     // Compute lastCommentAt: max timestamp across all comments/reviews
@@ -392,7 +382,9 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
       sendIfActive(index, 'ai-log', { index, text: `[AI response was cached to save tokens — ${cached.timestamp}]\n\n=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n` });
       const { statusText, statusClass } = applyOverrides(pr, cached.statusText, cached.statusClass);
       pr.aiStatus = statusText;
-      sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null, correspondence: cached.correspondence || null, lastCommentAt });
+      const cachedAutoArchive = cached.autoArchive || false;
+      if (cachedAutoArchive) onMarkUnimportant(pr.html_url, pr.title, lastCommentAt);
+      sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null, correspondence: cached.correspondence || null, autoArchive: cachedAutoArchive, lastCommentAt });
       return;
     }
 
@@ -407,16 +399,19 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
     const rawStatusClass = status.statusClass || 'warning';
     const rawCiUrl = status.ciUrl || null;
     const rawCorrespondence = status.correspondence || null;
+    const rawAutoArchive = status.autoArchive === true;
     writeCacheEntry(cacheKey, {
       statusText: rawStatusText,
       statusClass: rawStatusClass,
       ciUrl: rawCiUrl,
       correspondence: rawCorrespondence,
+      autoArchive: rawAutoArchive,
       timestamp: new Date().toISOString(),
     });
     const { statusText, statusClass } = applyOverrides(pr, rawStatusText, rawStatusClass);
     pr.aiStatus = statusText;
-    sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl, correspondence: rawCorrespondence, lastCommentAt });
+    if (rawAutoArchive) onMarkUnimportant(pr.html_url, pr.title, lastCommentAt);
+    sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl, correspondence: rawCorrespondence, autoArchive: rawAutoArchive, lastCommentAt });
   }
 
   async function runOne(index) {
@@ -473,14 +468,17 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
     drain();
   });
 
-  // Fire-and-forget auto-unarchive check
+  // Fire-and-forget: check archived and unimportant items for new comments
   if (archivedUrls && onAutoUnarchive && Object.keys(archivedUrls).length) {
-    checkAutoUnarchive(archivedUrls, allPRs, send, onAutoUnarchive, () => closed);
+    checkNewComments(archivedUrls, send, 'auto-unarchive', onAutoUnarchive, () => closed);
+  }
+  if (unimportantUrls && onResetUnimportant && Object.keys(unimportantUrls).length) {
+    checkNewComments(unimportantUrls, send, 'reset-unimportant', onResetUnimportant, () => closed);
   }
 }
 
-async function checkAutoUnarchive(archivedUrls, allItems, send, onAutoUnarchive, isClosed) {
-  for (const [url, entry] of Object.entries(archivedUrls)) {
+async function checkNewComments(urlMap, send, eventName, onMatch, isClosed) {
+  for (const [url, entry] of Object.entries(urlMap)) {
     if (isClosed()) break;
 
     const match = url.match(/github\.com\/([^/]+\/[^/]+)\/(pull|issues)\/(\d+)/);
@@ -489,7 +487,7 @@ async function checkAutoUnarchive(archivedUrls, allItems, send, onAutoUnarchive,
     const number = parseInt(numStr);
 
     let comments;
-    // eslint-disable-next-line no-restricted-syntax -- auto-unarchive: skip items where comment fetch fails (deleted repo, permissions, etc)
+    // eslint-disable-next-line no-restricted-syntax -- skip items where comment fetch fails (deleted repo, permissions, etc)
     try {
       comments = await fetchRecentComments(repo, number, { isPR: type === 'pull' });
     } catch {
@@ -499,8 +497,8 @@ async function checkAutoUnarchive(archivedUrls, allItems, send, onAutoUnarchive,
     if (!comments.length) continue;
 
     if (!isClosed()) {
-      onAutoUnarchive(url);
-      send('auto-unarchive', { url });
+      onMatch(url);
+      send(eventName, { url });
     }
   }
 }

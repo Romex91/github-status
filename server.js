@@ -54,6 +54,27 @@ function writeArchive(map) {
   writeFileSync(ARCHIVE_FILE, JSON.stringify({ archived: map }));
 }
 
+const UNIMPORTANT_FILE = join(DATA_DIR, 'correspondence-unimportant.json');
+function readUnimportant() {
+  if (!existsSync(UNIMPORTANT_FILE)) return {};
+  const data = JSON.parse(readFileSync(UNIMPORTANT_FILE, 'utf8'));
+  return data.items || {};
+}
+function writeUnimportant(map) {
+  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(UNIMPORTANT_FILE, JSON.stringify({ items: map }));
+}
+
+const MARKED_IMPORTANT_FILE = join(DATA_DIR, 'correspondence-important.json');
+function readMarkedImportant() {
+  if (!existsSync(MARKED_IMPORTANT_FILE)) return [];
+  return JSON.parse(readFileSync(MARKED_IMPORTANT_FILE, 'utf8')).urls || [];
+}
+function writeMarkedImportant(urls) {
+  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(MARKED_IMPORTANT_FILE, JSON.stringify({ urls }));
+}
+
 const AUTO_UNARCHIVED_FILE = join(DATA_DIR, 'auto-unarchived.json');
 function readAutoUnarchived() {
   if (!existsSync(AUTO_UNARCHIVED_FILE)) return [];
@@ -225,7 +246,9 @@ async function handleStatusStream(req, res) {
     const mentionedIssuesForHtml = allCorrespondence.filter(i => i.section === 'mentioned-issue');
     const commentedIssuesForHtml = allCorrespondence.filter(i => i.section === 'commented-issue');
     const autoUnarchivedUrls = readAutoUnarchived();
-    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, assignedIssuesForHtml, createdIssuesForHtml, mentionedPRsForHtml, commentedPRsForHtml, mentionedIssuesForHtml, commentedIssuesForHtml, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls, autoUnarchivedUrls });
+    const unimportantUrls = readUnimportant();
+    const markedImportantUrls = readMarkedImportant();
+    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, assignedIssuesForHtml, createdIssuesForHtml, mentionedPRsForHtml, commentedPRsForHtml, mentionedIssuesForHtml, commentedIssuesForHtml, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls, autoUnarchivedUrls, unimportantUrls, markedImportantUrls });
 
     if (!closed) {
       res.write(`event: done\ndata: ${JSON.stringify({ html })}\n\n`);
@@ -269,6 +292,20 @@ const server = http.createServer((req, res) => {
         if (!au.includes(url)) { au.push(url); writeAutoUnarchived(au); }
       },
       clearAutoUnarchived: () => writeAutoUnarchived([]),
+      onMarkUnimportant: (url, title, lastCommentAt) => {
+        if (readMarkedImportant().includes(url)) return;
+        const map = readUnimportant();
+        map[url] = { title: title || url, lastCommentAt: lastCommentAt || null };
+        writeUnimportant(map);
+      },
+      unimportantUrls: readUnimportant(),
+      onResetUnimportant: (url) => {
+        const map = readUnimportant();
+        delete map[url];
+        writeUnimportant(map);
+        const mi = readMarkedImportant().filter(u => u !== url);
+        writeMarkedImportant(mi);
+      },
     });
   } else if (pathname === '/api/ai-enqueue' && req.method === 'POST') {
     handlePost(req, res, (data) => {
@@ -375,6 +412,26 @@ const server = http.createServer((req, res) => {
       writeArchive(map);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, archivedCount: Object.keys(map).length }));
+    });
+  } else if (pathname === '/api/correspondence-unimportant' && req.method === 'GET') {
+    const items = readUnimportant();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ items }));
+  } else if (pathname === '/api/correspondence-unimportant' && req.method === 'POST') {
+    handlePost(req, res, (data) => {
+      const { url, action } = data;
+      if (!url || action !== 'mark-important') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid url or action' }));
+        return;
+      }
+      const map = readUnimportant();
+      delete map[url];
+      writeUnimportant(map);
+      const mi = readMarkedImportant();
+      if (!mi.includes(url)) { mi.push(url); writeMarkedImportant(mi); }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, unimportantCount: Object.keys(map).length }));
     });
   } else if (pathname === '/api/period' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
