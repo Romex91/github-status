@@ -274,7 +274,7 @@ function buildContextForItem(item) {
 
 // === SSE: Phase 2 - Stream AI status generation per PR ===
 
-export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, claudeVersion, onEnqueueReady, archivedUrls, onAutoUnarchive }) {
+export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, claudeVersion, onEnqueueReady, archivedUrls, onAutoUnarchive, clearAutoUnarchived }) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -283,6 +283,9 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
 
   let closed = false;
   req.on('close', () => { closed = true; onEnqueueReady(null); cleanAiCache(); cleanChatPrompts(); });
+
+  // Badges were already rendered in the HTML; clear the list so they don't persist next reload
+  if (clearAutoUnarchived) clearAutoUnarchived();
 
   function send(event, data) {
     if (closed) return;
@@ -352,6 +355,18 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
         const myReviews = (summary.reviews || []).some(r => r.author?.login === ghUsername);
         const myReviewComments = (promptData.reviewComments || []).some(rc => rc.user?.login === ghUsername);
         pr.iResponded = myComments || myReviews || myReviewComments;
+      }
+      // Skip commented PRs where user's only interaction was approving
+      if (pr.section === 'commented-pr') {
+        const myComments = (summary.comments || []).filter(c => c.author?.login === ghUsername);
+        const myReviews = (summary.reviews || []).filter(r => r.author?.login === ghUsername);
+        const myReviewComments = (promptData.reviewComments || []).filter(rc => rc.user?.login === ghUsername);
+        const onlyApproved = myComments.length === 0 && myReviewComments.length === 0
+          && myReviews.length > 0 && myReviews.every(r => r.state === 'APPROVED' && !r.body?.trim());
+        if (onlyApproved) {
+          sendIfActive(index, 'ai-skip', { index });
+          return;
+        }
       }
     }
 
@@ -470,21 +485,17 @@ async function checkAutoUnarchive(archivedUrls, allItems, send, onAutoUnarchive,
 
     const match = url.match(/github\.com\/([^/]+\/[^/]+)\/(pull|issues)\/(\d+)/);
     if (!match) continue;
-    const [, repo, , numStr] = match;
+    const [, repo, type, numStr] = match;
     const number = parseInt(numStr);
-    const since = entry.lastCommentAt || '2000-01-01T00:00:00Z';
-
-    // If item is in allItems, use updated_at as a cheap pre-filter
-    const item = allItems.find(it => it.html_url === url);
-    if (item && entry.lastCommentAt && item.updated_at <= entry.lastCommentAt) continue;
 
     let comments;
     // eslint-disable-next-line no-restricted-syntax -- auto-unarchive: skip items where comment fetch fails (deleted repo, permissions, etc)
     try {
-      comments = await fetchRecentComments(repo, number, since);
+      comments = await fetchRecentComments(repo, number, { isPR: type === 'pull' });
     } catch {
       continue;
     }
+    if (entry.lastCommentAt) comments = comments.filter(c => c.createdAt > entry.lastCommentAt);
     if (!comments.length) continue;
 
     if (!isClosed()) {

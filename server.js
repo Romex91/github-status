@@ -268,6 +268,7 @@ const server = http.createServer((req, res) => {
         const au = readAutoUnarchived();
         if (!au.includes(url)) { au.push(url); writeAutoUnarchived(au); }
       },
+      clearAutoUnarchived: () => writeAutoUnarchived([]),
     });
   } else if (pathname === '/api/ai-enqueue' && req.method === 'POST') {
     handlePost(req, res, (data) => {

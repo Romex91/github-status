@@ -125,10 +125,12 @@ export async function fetchCommentedIssues(log, since) {
   return issues;
 }
 
-export async function fetchRecentComments(repo, number, since) {
-  const raw = await gh('api', `repos/${repo}/issues/${number}/comments?since=${since}&per_page=30`);
-  const comments = JSON.parse(raw);
-  return comments.map(c => ({
+export async function fetchRecentComments(repo, number, { isPR } = {}) {
+  const fetches = [gh('api', `repos/${repo}/issues/${number}/comments?per_page=100`)];
+  if (isPR) fetches.push(gh('api', `repos/${repo}/pulls/${number}/comments?per_page=100`));
+  const results = await Promise.all(fetches);
+  const all = results.flatMap(raw => JSON.parse(raw));
+  return all.map(c => ({
     author: c.user?.login || 'unknown',
     body: c.body || '',
     createdAt: c.created_at,

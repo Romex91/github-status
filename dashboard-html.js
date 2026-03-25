@@ -148,7 +148,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     return `<td class="status-col" id="status-${globalIndex}">
                     <span class="status-text">waiting...</span>
                     <div class="correspondence-citations" id="corr-${globalIndex}"></div>
-                    <br><span id="inline-actions-${globalIndex}"></span><span class="action-btn action-btn-archive" onclick="archiveItem('${urlEsc}', this)">ARCHIVE<span class="archive-tooltip">YOU WILL NOT SEE UPDATES FOR THIS PR!!!</span></span><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
+                    <br><span id="inline-actions-${globalIndex}"></span><span class="action-btn action-btn-archive action-btn-disabled" id="archive-btn-${globalIndex}">ARCHIVE</span><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
   }
@@ -300,6 +300,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
         .correspondence-citations a { color: #8b949e; text-decoration: underline; }
         .correspondence-citations a:hover { color: #c9d1d9; }
         .action-btn-archive { color: #f85149; border-color: #f85149; position: relative; }
+        .action-btn-archive.action-btn-disabled { color: #484f58; border-color: #484f58; cursor: default; pointer-events: none; }
         .action-btn-archive:hover { color: #ff7b72; border-color: #ff7b72; background: #2d1b1b; }
         .archive-tooltip { display: none; position: absolute; left: 0; bottom: 100%; background: #161b22; border: 1px solid #f85149; border-radius: 4px; padding: 4px 8px; color: #f85149; font-weight: 700; font-size: 11px; white-space: nowrap; z-index: 10; margin-bottom: 4px; pointer-events: none; }
         .action-btn-archive:hover .archive-tooltip { display: block; }
@@ -627,6 +628,8 @@ ${commentedIssueRows}
             var link = row.querySelector('.title-col a');
             var title = link ? link.textContent : url;
             var lastCommentAt = row.getAttribute('data-last-comment') || null;
+            var badge = row.querySelector('.unarchived-badge');
+            if (badge) badge.remove();
             row.setAttribute('data-archived', '1');
             row.style.display = 'none';
             updateHeadingCount(row, -1);
@@ -838,6 +841,23 @@ ${commentedIssueRows}
                 }
                 corrDiv.innerHTML = html;
             }
+            var archBtn = document.getElementById('archive-btn-' + d.index);
+            if (archBtn) {
+                var urlEsc = archBtn.closest('tr').getAttribute('data-url');
+                archBtn.classList.remove('action-btn-disabled');
+                archBtn.setAttribute('onclick', "archiveItem('" + urlEsc.replace(/'/g, '&#39;') + "', this)");
+                archBtn.innerHTML = 'ARCHIVE<span class="archive-tooltip">YOU WILL NOT SEE UPDATES FOR THIS PR!!!</span>';
+            }
+        });
+
+        onSSE(es, 'ai-skip', function(d) {
+            var cell = document.getElementById('status-' + d.index);
+            if (!cell) return;
+            var row = cell.closest('tr');
+            if (!row) return;
+            row.style.display = 'none';
+            updateHeadingCount(row, -1);
+            updateCorrespondenceTab();
         });
 
         onSSE(es, 'ai-error', function() {});
