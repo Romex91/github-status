@@ -160,7 +160,7 @@ export async function fetchPRSummary(repo, number, signal) {
 
 export async function fetchPRPromptData(repo, number, signal) {
   const [owner, name] = repo.split('/');
-  const threadsQuery = `{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){pullRequest(number:${number}){url,comments(first:100){nodes{databaseId,reactions(first:20){nodes{content,user{login}}}}},reviewThreads(first:100){nodes{isOutdated,comments(first:100){nodes{databaseId,path,createdAt,body,author{login},replyTo{databaseId},line,originalLine,diffHunk}}}}}}}`;
+  const threadsQuery = `{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){pullRequest(number:${number}){url,comments(first:100){nodes{databaseId,reactions(first:20){nodes{content,user{login}}}}},commits(first:100){nodes{commit{oid,message,committedDate,author{user{login}}}}},reviewThreads(first:100){nodes{isOutdated,comments(first:100){nodes{databaseId,path,createdAt,body,author{login},replyTo{databaseId},line,originalLine,diffHunk}}}}}}}`;
   const [diffRaw, threadsRaw] = await Promise.all([
     gh('pr', 'diff', String(number), '--repo', repo, signal),
     gh('api', 'graphql', '-f', `query=${threadsQuery}`, signal),
@@ -199,9 +199,16 @@ export async function fetchPRPromptData(repo, number, signal) {
       });
     }
   }
+  const commits = (prData.commits?.nodes || []).map(n => ({
+    sha: n.commit.oid?.slice(0, 7),
+    message: n.commit.message,
+    date: n.commit.committedDate,
+    author: n.commit.author?.user?.login,
+  }));
   return {
     diff: diffRaw.length > 20000 ? diffRaw.slice(0, 20000) + '\n... (truncated)' : diffRaw,
     reviewComments,
     commentReactions,
+    commits,
   };
 }

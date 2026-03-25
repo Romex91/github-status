@@ -37,6 +37,16 @@ function buildTimeline(d) {
     });
   }
 
+  // Commits
+  for (const c of (d.commits || [])) {
+    entries.push({
+      timestamp: c.date,
+      author: c.author,
+      type: 'commit',
+      body: `${c.sha} ${c.message}`,
+    });
+  }
+
   // Review thread comments (line-level)
   for (const rc of (d.reviewComments || [])) {
     entries.push({
