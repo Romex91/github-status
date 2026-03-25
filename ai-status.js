@@ -1,6 +1,6 @@
 import { runCmd, CHAOS, CMD_TIMEOUT } from './helpers.js';
 import { readCacheEntry, writeCacheEntry, hashPrompt, cleanAiCache } from './ai-cache.js';
-import { fetchIssueDetails, fetchPRSummary, fetchPRPromptData } from './github-api.js';
+import { fetchIssueDetails, fetchPRSummary, fetchPRPromptData, fetchRecentComments } from './github-api.js';
 import { cleanChatPrompts } from './launch-chat.js';
 
 // === Timeline / Context / Prompt Builders ===
@@ -274,7 +274,7 @@ function buildContextForItem(item) {
 
 // === SSE: Phase 2 - Stream AI status generation per PR ===
 
-export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, claudeVersion, onEnqueueReady }) {
+export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, claudeVersion, onEnqueueReady, archivedUrls, onAutoUnarchive }) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -355,6 +355,14 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
       }
     }
 
+    // Compute lastCommentAt: max timestamp across all comments/reviews
+    const timestamps = [];
+    const d = pr.details || {};
+    for (const c of (d.comments || [])) if (c.createdAt) timestamps.push(c.createdAt);
+    for (const r of (d.reviews || [])) if (r.submittedAt) timestamps.push(r.submittedAt);
+    for (const rc of (d.reviewComments || [])) if (rc.created_at) timestamps.push(rc.created_at);
+    const lastCommentAt = timestamps.length ? timestamps.sort().pop() : null;
+
     let prompt = buildPromptForItem(pr, ghUsername);
     pr.builtPrompt = prompt;
     pr.chatContext = buildContextForItem(pr);
@@ -369,7 +377,7 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
       sendIfActive(index, 'ai-log', { index, text: `[AI response was cached to save tokens — ${cached.timestamp}]\n\n=== CMD: claude -p --model haiku ===\n\n=== Prompt ===\n${prompt}\n` });
       const { statusText, statusClass } = applyOverrides(pr, cached.statusText, cached.statusClass);
       pr.aiStatus = statusText;
-      sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null, correspondence: cached.correspondence || null });
+      sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: cached.ciUrl || null, correspondence: cached.correspondence || null, lastCommentAt });
       return;
     }
 
@@ -393,7 +401,7 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
     });
     const { statusText, statusClass } = applyOverrides(pr, rawStatusText, rawStatusClass);
     pr.aiStatus = statusText;
-    sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl, correspondence: rawCorrespondence });
+    sendIfActive(index, 'ai-done', { index, statusText, statusClass, ciUrl: rawCiUrl, correspondence: rawCorrespondence, lastCommentAt });
   }
 
   async function runOne(index) {
@@ -449,4 +457,39 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
     }
     drain();
   });
+
+  // Fire-and-forget auto-unarchive check
+  if (archivedUrls && onAutoUnarchive && Object.keys(archivedUrls).length) {
+    checkAutoUnarchive(archivedUrls, allPRs, send, onAutoUnarchive, () => closed);
+  }
+}
+
+async function checkAutoUnarchive(archivedUrls, allItems, send, onAutoUnarchive, isClosed) {
+  for (const [url, entry] of Object.entries(archivedUrls)) {
+    if (isClosed()) break;
+
+    const match = url.match(/github\.com\/([^/]+\/[^/]+)\/(pull|issues)\/(\d+)/);
+    if (!match) continue;
+    const [, repo, , numStr] = match;
+    const number = parseInt(numStr);
+    const since = entry.lastCommentAt || '2000-01-01T00:00:00Z';
+
+    // If item is in allItems, use updated_at as a cheap pre-filter
+    const item = allItems.find(it => it.html_url === url);
+    if (item && entry.lastCommentAt && item.updated_at <= entry.lastCommentAt) continue;
+
+    let comments;
+    // eslint-disable-next-line no-restricted-syntax -- auto-unarchive: skip items where comment fetch fails (deleted repo, permissions, etc)
+    try {
+      comments = await fetchRecentComments(repo, number, since);
+    } catch {
+      continue;
+    }
+    if (!comments.length) continue;
+
+    if (!isClosed()) {
+      onAutoUnarchive(url);
+      send('auto-unarchive', { url });
+    }
+  }
 }

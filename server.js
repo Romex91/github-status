@@ -39,14 +39,29 @@ function readArchive() {
   // Migrate from old array format
   if (Array.isArray(data.archived)) {
     const map = {};
-    data.archived.forEach(url => { map[url] = url; });
+    data.archived.forEach(url => { map[url] = { title: url, lastCommentAt: null }; });
     return map;
   }
-  return data.archived || {};
+  const raw = data.archived || {};
+  // Migrate from old string-value format to { title, lastCommentAt }
+  for (const url of Object.keys(raw)) {
+    if (typeof raw[url] === 'string') raw[url] = { title: raw[url], lastCommentAt: null };
+  }
+  return raw;
 }
 function writeArchive(map) {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
   writeFileSync(ARCHIVE_FILE, JSON.stringify({ archived: map }));
+}
+
+const AUTO_UNARCHIVED_FILE = join(DATA_DIR, 'auto-unarchived.json');
+function readAutoUnarchived() {
+  if (!existsSync(AUTO_UNARCHIVED_FILE)) return [];
+  return JSON.parse(readFileSync(AUTO_UNARCHIVED_FILE, 'utf8')).urls || [];
+}
+function writeAutoUnarchived(urls) {
+  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(AUTO_UNARCHIVED_FILE, JSON.stringify({ urls }));
 }
 
 function periodToSince(period) {
@@ -209,7 +224,8 @@ async function handleStatusStream(req, res) {
     const commentedPRsForHtml = allCorrespondence.filter(i => i.section === 'commented-pr');
     const mentionedIssuesForHtml = allCorrespondence.filter(i => i.section === 'mentioned-issue');
     const commentedIssuesForHtml = allCorrespondence.filter(i => i.section === 'commented-issue');
-    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, assignedIssuesForHtml, createdIssuesForHtml, mentionedPRsForHtml, commentedPRsForHtml, mentionedIssuesForHtml, commentedIssuesForHtml, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls });
+    const autoUnarchivedUrls = readAutoUnarchived();
+    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, assignedIssuesForHtml, createdIssuesForHtml, mentionedPRsForHtml, commentedPRsForHtml, mentionedIssuesForHtml, commentedIssuesForHtml, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls, autoUnarchivedUrls });
 
     if (!closed) {
       res.write(`event: done\ndata: ${JSON.stringify({ html })}\n\n`);
@@ -244,6 +260,14 @@ const server = http.createServer((req, res) => {
       ghVersion,
       claudeVersion,
       onEnqueueReady: (fn) => { enqueueAIItems = fn; },
+      archivedUrls: readArchive(),
+      onAutoUnarchive: (url) => {
+        const map = readArchive();
+        delete map[url];
+        writeArchive(map);
+        const au = readAutoUnarchived();
+        if (!au.includes(url)) { au.push(url); writeAutoUnarchived(au); }
+      },
     });
   } else if (pathname === '/api/ai-enqueue' && req.method === 'POST') {
     handlePost(req, res, (data) => {
@@ -333,14 +357,20 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ archived }));
   } else if (pathname === '/api/correspondence-archive' && req.method === 'POST') {
     handlePost(req, res, (data) => {
-      const { url, action, title } = data;
+      const { url, action, title, lastCommentAt } = data;
       if (!url || !['archive', 'unarchive'].includes(action)) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid url or action' }));
         return;
       }
       const map = readArchive();
-      if (action === 'archive') map[url] = title || url; else delete map[url];
+      if (action === 'archive') {
+        map[url] = { title: title || url, lastCommentAt: lastCommentAt || null };
+        const au = readAutoUnarchived().filter(u => u !== url);
+        writeAutoUnarchived(au);
+      } else {
+        delete map[url];
+      }
       writeArchive(map);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, archivedCount: Object.keys(map).length }));

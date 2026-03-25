@@ -125,6 +125,17 @@ export async function fetchCommentedIssues(log, since) {
   return issues;
 }
 
+export async function fetchRecentComments(repo, number, since) {
+  const raw = await gh('api', `repos/${repo}/issues/${number}/comments?since=${since}&per_page=30`);
+  const comments = JSON.parse(raw);
+  return comments.map(c => ({
+    author: c.user?.login || 'unknown',
+    body: c.body || '',
+    createdAt: c.created_at,
+    url: c.html_url,
+  }));
+}
+
 export async function fetchIssueDetails(repo, number, signal) {
   const [owner, name] = repo.split('/');
   const query = `{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){issue(number:${number}){body,labels(first:20){nodes{name}},assignees(first:20){nodes{login}},comments(first:100){nodes{databaseId,body,createdAt,url,author{login},reactions(first:20){nodes{content,user{login}}}}}}}}`;

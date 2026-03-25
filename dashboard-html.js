@@ -70,8 +70,9 @@ export const INDEX_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssues, mentionedPRs, commentedPRs, mentionedIssues, commentedIssues, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls }) {
+export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssues, mentionedPRs, commentedPRs, mentionedIssues, commentedIssues, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls, autoUnarchivedUrls }) {
   const archivedSet = new Set(Object.keys(archivedUrls || {}));
+  const autoUnarchivedSet = new Set(autoUnarchivedUrls || []);
   function repoColor(repoName) {
     return repoColorMap[repoName] || '#8b949e';
   }
@@ -159,9 +160,10 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     const color = repoColor(repoShort);
     const isArchived = archivedSet.has(item.html_url);
     const urlAttr = escapeHtml(item.html_url).replace(/"/g, '&quot;');
+    const unarchivedBadge = autoUnarchivedSet.has(item.html_url) ? ' <span class="unarchived-badge">unarchived: new comments</span>' : '';
     return `            <tr data-url="${urlAttr}"${isArchived ? ' data-archived="1" style="display:none"' : ''}>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
-                <td class="title-col" colspan="2"><a href="${escapeHtml(item.html_url)}">#${item.number} ${escapeHtml(item.title)}</a>${authorSpan}${stateSpan}</td>
+                <td class="title-col" colspan="2"><a href="${escapeHtml(item.html_url)}">#${item.number} ${escapeHtml(item.title)}</a>${authorSpan}${stateSpan}${unarchivedBadge}</td>
                 ${correspondenceStatusCell(item, globalIndex)}
                 <td class="ci-col"></td>
                 <td class="days-col days-${daysClass(item.days)}">${item.days}d</td>
@@ -250,6 +252,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
         .header-links a:hover { color: #58a6ff; }
 
         .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
+        .unarchived-badge { font-size: 10px; color: #d29922; border: 1px solid #d29922; border-radius: 3px; padding: 1px 4px; margin-left: 6px; }
         .status-text { white-space: pre-wrap; }
         .status-text.loading { color: #d29922; }
         .copy-prompt { cursor: pointer; color: #8b949e; font-size: 10px; position: relative; padding: 2px 8px; margin-right: 6px; font-family: inherit; display: inline-block; }
@@ -623,6 +626,7 @@ ${commentedIssueRows}
             var row = el.closest('tr');
             var link = row.querySelector('.title-col a');
             var title = link ? link.textContent : url;
+            var lastCommentAt = row.getAttribute('data-last-comment') || null;
             row.setAttribute('data-archived', '1');
             row.style.display = 'none';
             updateHeadingCount(row, -1);
@@ -631,7 +635,7 @@ ${commentedIssueRows}
             fetch('/api/correspondence-archive', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url, action: 'archive', title: title })
+                body: JSON.stringify({ url: url, action: 'archive', title: title, lastCommentAt: lastCommentAt })
             }).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.error) throw new Error(d.error);
             });
@@ -657,7 +661,8 @@ ${commentedIssueRows}
                     html += '<div style="color:#8b949e">No archived items.</div>';
                 } else {
                     urls.forEach(function(url) {
-                        var title = d.archived[url] || url;
+                        var entry = d.archived[url];
+                        var title = (entry && entry.title) ? entry.title : (typeof entry === 'string' ? entry : url);
                         var u = url.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
                         html += '<div class="archive-item"><a href="' + u + '" target="_blank">' + title.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a><button class="unarchive-btn" onclick="unarchiveItem(\\'' + u.replace(/'/g,'&#39;') + '\\')">unarchive</button></div>';
                     });
@@ -808,6 +813,10 @@ ${commentedIssueRows}
         onSSE(es, 'ai-done', function(d) {
             if (phaseTimers[d.index]) { clearInterval(phaseTimers[d.index]); delete phaseTimers[d.index]; }
             var cell = document.getElementById('status-' + d.index);
+            if (d.lastCommentAt) {
+                var row = cell.closest('tr');
+                if (row) row.setAttribute('data-last-comment', d.lastCommentAt);
+            }
             var logDiv = document.getElementById('ai-log-' + d.index);
             logDiv.textContent += '\\\\n--- Result ---\\\\n' + JSON.stringify({statusText: d.statusText, statusClass: d.statusClass, correspondence: d.correspondence}, null, 2);
             var btn = cell.querySelector('.copy-prompt');
@@ -832,6 +841,30 @@ ${commentedIssueRows}
         });
 
         onSSE(es, 'ai-error', function() {});
+
+        onSSE(es, 'auto-unarchive', function(d) {
+            var rows = document.querySelectorAll('#tab-correspondence tr[data-url="' + d.url.replace(/"/g, '\\\\"') + '"]');
+            rows.forEach(function(row) {
+                row.removeAttribute('data-archived');
+                row.style.display = '';
+                updateHeadingCount(row, 1);
+                var titleCol = row.querySelector('.title-col');
+                if (titleCol && !titleCol.querySelector('.unarchived-badge')) {
+                    var badge = document.createElement('span');
+                    badge.className = 'unarchived-badge';
+                    badge.textContent = 'unarchived: new comments';
+                    titleCol.appendChild(badge);
+                }
+                var idx = parseInt(row.getAttribute('data-idx'));
+                if (!isNaN(idx) && !enqueued[idx]) {
+                    enqueued[idx] = true;
+                    pendingEnqueue.push(idx);
+                    if (!enqueueTimer) enqueueTimer = setTimeout(flushEnqueue, 50);
+                }
+            });
+            updateArchiveInfo(-1);
+            updateCorrespondenceTab();
+        });
 
         es.onerror = function() {
             if (es.readyState === EventSource.CLOSED) return;
