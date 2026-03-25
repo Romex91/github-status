@@ -34,12 +34,19 @@ function writePeriod(val) {
 
 const ARCHIVE_FILE = join(DATA_DIR, 'correspondence-archive.json');
 function readArchive() {
-  if (existsSync(ARCHIVE_FILE)) return new Set(JSON.parse(readFileSync(ARCHIVE_FILE, 'utf8')).archived);
-  return new Set();
+  if (!existsSync(ARCHIVE_FILE)) return {};
+  const data = JSON.parse(readFileSync(ARCHIVE_FILE, 'utf8'));
+  // Migrate from old array format
+  if (Array.isArray(data.archived)) {
+    const map = {};
+    data.archived.forEach(url => { map[url] = url; });
+    return map;
+  }
+  return data.archived || {};
 }
-function writeArchive(set) {
+function writeArchive(map) {
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(ARCHIVE_FILE, JSON.stringify({ archived: [...set] }));
+  writeFileSync(ARCHIVE_FILE, JSON.stringify({ archived: map }));
 }
 
 function periodToSince(period) {
@@ -321,22 +328,22 @@ const server = http.createServer((req, res) => {
       res.end(JSON.stringify({ ok: true }));
     });
   } else if (pathname === '/api/correspondence-archive' && req.method === 'GET') {
-    const archived = [...readArchive()];
+    const archived = readArchive();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ archived }));
   } else if (pathname === '/api/correspondence-archive' && req.method === 'POST') {
     handlePost(req, res, (data) => {
-      const { url, action } = data;
+      const { url, action, title } = data;
       if (!url || !['archive', 'unarchive'].includes(action)) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid url or action' }));
         return;
       }
-      const set = readArchive();
-      if (action === 'archive') set.add(url); else set.delete(url);
-      writeArchive(set);
+      const map = readArchive();
+      if (action === 'archive') map[url] = title || url; else delete map[url];
+      writeArchive(map);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, archivedCount: set.size }));
+      res.end(JSON.stringify({ ok: true, archivedCount: Object.keys(map).length }));
     });
   } else if (pathname === '/api/period' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -71,7 +71,7 @@ export const INDEX_HTML = `<!DOCTYPE html>
 </html>`;
 
 export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssues, mentionedPRs, commentedPRs, mentionedIssues, commentedIssues, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls }) {
-  const archivedSet = archivedUrls || new Set();
+  const archivedSet = new Set(Object.keys(archivedUrls || {}));
   function repoColor(repoName) {
     return repoColorMap[repoName] || '#8b949e';
   }
@@ -613,6 +613,8 @@ ${commentedIssueRows}
 
         function archiveItem(url, el) {
             var row = el.closest('tr');
+            var link = row.querySelector('.title-col a');
+            var title = link ? link.textContent : url;
             row.setAttribute('data-archived', '1');
             row.style.display = 'none';
             updateHeadingCount(row, -1);
@@ -620,77 +622,72 @@ ${commentedIssueRows}
             fetch('/api/correspondence-archive', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url, action: 'archive' })
+                body: JSON.stringify({ url: url, action: 'archive', title: title })
             }).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.error) throw new Error(d.error);
             });
         }
 
         function showArchived() {
-            var rows = document.querySelectorAll('#tab-correspondence tr[data-archived]');
-            var existing = document.getElementById('archive-overlay');
-            if (existing) existing.remove();
-            var existingPopup = document.getElementById('archive-popup');
-            if (existingPopup) existingPopup.remove();
+            fetch('/api/correspondence-archive').then(function(r) { return r.json(); }).then(function(d) {
+                if (d.error) throw new Error(d.error);
+                var existing = document.getElementById('archive-overlay');
+                if (existing) existing.remove();
+                var existingPopup = document.getElementById('archive-popup');
+                if (existingPopup) existingPopup.remove();
 
-            var overlay = document.createElement('div');
-            overlay.id = 'archive-overlay';
-            var popup = document.createElement('div');
-            popup.id = 'archive-popup';
-            overlay.onclick = function() { overlay.remove(); popup.remove(); };
+                var overlay = document.createElement('div');
+                overlay.id = 'archive-overlay';
+                var popup = document.createElement('div');
+                popup.id = 'archive-popup';
+                overlay.onclick = function() { overlay.remove(); popup.remove(); };
 
-            var seen = {};
-            var items = [];
-            rows.forEach(function(row) {
-                var rawUrl = row.getAttribute('data-url');
-                if (seen[rawUrl]) return;
-                seen[rawUrl] = true;
-                var link = row.querySelector('.title-col a');
-                items.push({ url: rawUrl, title: link ? link.textContent : rawUrl });
+                var urls = Object.keys(d.archived);
+                var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="color:#c9d1d9;font-size:14px;font-weight:600">Archived items (' + urls.length + ')</span><span style="cursor:pointer;color:#8b949e;font-size:18px" onclick="document.getElementById(\\'archive-overlay\\').remove();document.getElementById(\\'archive-popup\\').remove()">\u00d7</span></div>';
+                if (urls.length === 0) {
+                    html += '<div style="color:#8b949e">No archived items.</div>';
+                } else {
+                    urls.forEach(function(url) {
+                        var title = d.archived[url] || url;
+                        var u = url.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                        html += '<div class="archive-item"><a href="' + u + '" target="_blank">' + title.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a><button class="unarchive-btn" onclick="unarchiveItem(\\'' + u.replace(/'/g,'&#39;') + '\\')">unarchive</button></div>';
+                    });
+                }
+                popup.innerHTML = html;
+                document.body.appendChild(overlay);
+                document.body.appendChild(popup);
             });
-
-            var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="color:#c9d1d9;font-size:14px;font-weight:600">Archived items (' + items.length + ')</span><span style="cursor:pointer;color:#8b949e;font-size:18px" onclick="document.getElementById(\\'archive-overlay\\').remove();document.getElementById(\\'archive-popup\\').remove()">\u00d7</span></div>';
-            if (items.length === 0) {
-                html += '<div style="color:#8b949e">No archived items.</div>';
-            } else {
-                items.forEach(function(item) {
-                    var u = item.url.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-                    html += '<div class="archive-item"><a href="' + u + '" target="_blank">' + item.title.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a><button class="unarchive-btn" onclick="unarchiveItem(\\'' + u.replace(/'/g,'&#39;') + '\\')">unarchive</button></div>';
-                });
-            }
-            popup.innerHTML = html;
-            document.body.appendChild(overlay);
-            document.body.appendChild(popup);
         }
 
         function unarchiveItem(url) {
-            var row = document.querySelector('#tab-correspondence tr[data-url="' + url.replace(/"/g, '\\\\"') + '"]');
-            if (row) {
-                row.removeAttribute('data-archived');
-                row.style.display = '';
-                updateHeadingCount(row, 1);
-                // Trigger AI processing for the restored row
-                var idx = parseInt(row.getAttribute('data-idx'));
-                if (!isNaN(idx) && !enqueued[idx]) {
-                    enqueued[idx] = true;
-                    pendingEnqueue.push(idx);
-                    if (!enqueueTimer) enqueueTimer = setTimeout(flushEnqueue, 50);
-                }
-            }
-            updateArchiveInfo(-1);
-            // Refresh the overlay
+            // Close overlay first
             var ov = document.getElementById('archive-overlay');
             var pp = document.getElementById('archive-popup');
             if (ov) ov.remove();
             if (pp) pp.remove();
-            var remaining = document.querySelectorAll('#tab-correspondence tr[data-archived]');
-            if (remaining.length > 0) showArchived();
+
             fetch('/api/correspondence-archive', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ url: url, action: 'unarchive' })
             }).then(function(r) { return r.json(); }).then(function(d) {
                 if (d.error) throw new Error(d.error);
+                // Show DOM row if it exists (same time period)
+                var rows = document.querySelectorAll('#tab-correspondence tr[data-url="' + url.replace(/"/g, '\\\\"') + '"]');
+                rows.forEach(function(row) {
+                    row.removeAttribute('data-archived');
+                    row.style.display = '';
+                    updateHeadingCount(row, 1);
+                    var idx = parseInt(row.getAttribute('data-idx'));
+                    if (!isNaN(idx) && !enqueued[idx]) {
+                        enqueued[idx] = true;
+                        pendingEnqueue.push(idx);
+                        if (!enqueueTimer) enqueueTimer = setTimeout(flushEnqueue, 50);
+                    }
+                });
+                updateArchiveInfo(-1);
+                // Re-open overlay if more items remain
+                if (d.archivedCount > 0) showArchived();
             });
         }
 
