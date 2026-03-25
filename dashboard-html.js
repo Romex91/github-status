@@ -70,7 +70,8 @@ export const INDEX_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssues, mentionedPRs, commentedPRs, mentionedIssues, commentedIssues, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername }) {
+export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssues, mentionedPRs, commentedPRs, mentionedIssues, commentedIssues, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls }) {
+  const archivedSet = archivedUrls || new Set();
   function repoColor(repoName) {
     return repoColorMap[repoName] || '#8b949e';
   }
@@ -142,10 +143,11 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     if (item.fetchError) {
       return `<td class="status-col status-bad">Fetch failed: ${escapeHtml(item.fetchError)}</td>`;
     }
+    const urlEsc = escapeHtml(item.html_url).replace(/'/g, '&#39;');
     return `<td class="status-col" id="status-${globalIndex}">
                     <span class="status-text">waiting...</span>
                     <div class="correspondence-citations" id="corr-${globalIndex}"></div>
-                    <br><span id="inline-actions-${globalIndex}"></span><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
+                    <br><span id="inline-actions-${globalIndex}"></span><span class="action-btn action-btn-archive" onclick="archiveItem('${urlEsc}', this)">ARCHIVE<span class="archive-tooltip">YOU WILL NOT SEE UPDATES FOR THIS PR!!!</span></span><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
   }
@@ -155,7 +157,9 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     const authorSpan = includeAuthor ? ` <span class="author">@${escapeHtml(item.author)}</span>` : '';
     const stateSpan = includeState ? stateBadge(item.state) : '';
     const color = repoColor(repoShort);
-    return `            <tr>
+    const isArchived = archivedSet.has(item.html_url);
+    const urlAttr = escapeHtml(item.html_url).replace(/"/g, '&quot;');
+    return `            <tr data-url="${urlAttr}"${isArchived ? ' data-archived="1" style="display:none"' : ''}>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
                 <td class="title-col" colspan="2"><a href="${escapeHtml(item.html_url)}">#${item.number} ${escapeHtml(item.title)}</a>${authorSpan}${stateSpan}</td>
                 ${correspondenceStatusCell(item, globalIndex)}
@@ -178,6 +182,11 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
   const commentedPRRows = commentedPRs.map(pr => correspondenceRow(pr, true, idx++, true)).join('\n');
   const mentionedIssueRows = mentionedIssues.map(i => correspondenceRow(i, false, idx++, false)).join('\n');
   const commentedIssueRows = commentedIssues.map(i => correspondenceRow(i, false, idx++, false)).join('\n');
+
+  const visibleMentionedPRs = mentionedPRs.filter(p => !archivedSet.has(p.html_url)).length;
+  const visibleCommentedPRs = commentedPRs.filter(p => !archivedSet.has(p.html_url)).length;
+  const visibleMentionedIssues = mentionedIssues.filter(i => !archivedSet.has(i.html_url)).length;
+  const visibleCommentedIssues = commentedIssues.filter(i => !archivedSet.has(i.html_url)).length;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -286,6 +295,18 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
         .correspondence-citations .corr-author { color: #d29922; font-weight: 500; }
         .correspondence-citations a { color: #8b949e; text-decoration: underline; }
         .correspondence-citations a:hover { color: #c9d1d9; }
+        .action-btn-archive { color: #f85149; border-color: #f85149; position: relative; }
+        .action-btn-archive:hover { color: #ff7b72; border-color: #ff7b72; background: #2d1b1b; }
+        .archive-tooltip { display: none; position: absolute; left: 0; bottom: 100%; background: #161b22; border: 1px solid #f85149; border-radius: 4px; padding: 4px 8px; color: #f85149; font-weight: 700; font-size: 11px; white-space: nowrap; z-index: 10; margin-bottom: 4px; pointer-events: none; }
+        .action-btn-archive:hover .archive-tooltip { display: block; }
+        #archive-info { color: #8b949e; font-size: 11px; margin: 4px 0 12px 0; }
+        #archive-info a { color: #58a6ff; cursor: pointer; }
+        #archive-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 199; }
+        #archive-popup { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; z-index: 200; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; font-size: 12px; }
+        #archive-popup .archive-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #21262d; }
+        #archive-popup .archive-item a { color: #58a6ff; word-break: break-all; }
+        #archive-popup .unarchive-btn { cursor: pointer; color: #3fb950; background: #1a2b1a; border: 1px solid #3fb950; border-radius: 3px; padding: 2px 8px; font-family: inherit; font-size: 11px; margin-left: 8px; white-space: nowrap; }
+        #archive-popup .unarchive-btn:hover { color: #56d364; border-color: #56d364; background: #223d22; }
     </style>
 </head>
 <body>
@@ -381,8 +402,11 @@ ${createdIssueRows}
 
     <div id="tab-correspondence" class="tab-panel">
     <h1 class="section-heading">Correspondence</h1>
+    <div id="archive-info" style="display:${archivedSet.size > 0 ? '' : 'none'}">
+        <span id="archive-count">${archivedSet.size}</span> archived — <a onclick="showArchived()">manage</a>
+    </div>
 
-    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)} mentioned in PRs (${mentionedPRs.length})</h2>
+    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)} mentioned in PRs (${visibleMentionedPRs})</h2>
     <table>
         <thead>
             <tr>
@@ -399,7 +423,7 @@ ${mentionedPRRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="toggleFold(this)">My comments in PRs of other people (${commentedPRs.length})</h2>
+    <h2 onclick="toggleFold(this)">My comments in PRs of other people (${visibleCommentedPRs})</h2>
     <table>
         <thead>
             <tr>
@@ -416,7 +440,7 @@ ${commentedPRRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)} mentioned in Issues (${mentionedIssues.length})</h2>
+    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)} mentioned in Issues (${visibleMentionedIssues})</h2>
     <table>
         <thead>
             <tr>
@@ -433,7 +457,7 @@ ${mentionedIssueRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="toggleFold(this)">My comments in Issues of other people (${commentedIssues.length})</h2>
+    <h2 onclick="toggleFold(this)">My comments in Issues of other people (${visibleCommentedIssues})</h2>
     <table>
         <thead>
             <tr>
@@ -565,6 +589,102 @@ ${commentedIssueRows}
             var text = el.textContent;
             if (!text) return;
             navigator.clipboard.writeText(text).then(function() { showCopyToast(el); });
+        }
+
+        function updateHeadingCount(row, delta) {
+            var section = row.closest('table').previousElementSibling;
+            while (section && section.tagName !== 'H2') section = section.previousElementSibling;
+            if (!section) return;
+            var m = section.textContent.match(/\\((\d+)\\)/);
+            if (m) {
+                var newCount = Math.max(0, parseInt(m[1]) + delta);
+                section.childNodes.forEach(function(n) {
+                    if (n.nodeType === 3) n.textContent = n.textContent.replace(/\\(\d+\\)/, '(' + newCount + ')');
+                });
+            }
+        }
+
+        function updateArchiveInfo(delta) {
+            var countEl = document.getElementById('archive-count');
+            var infoEl = document.getElementById('archive-info');
+            var n = Math.max(0, parseInt(countEl.textContent) + delta);
+            countEl.textContent = n;
+            infoEl.style.display = n > 0 ? '' : 'none';
+        }
+
+        function archiveItem(url, el) {
+            var row = el.closest('tr');
+            row.setAttribute('data-archived', '1');
+            row.style.display = 'none';
+            updateHeadingCount(row, -1);
+            updateArchiveInfo(1);
+            fetch('/api/correspondence-archive', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: url, action: 'archive' })
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.error) throw new Error(d.error);
+            });
+        }
+
+        function showArchived() {
+            var rows = document.querySelectorAll('#tab-correspondence tr[data-archived]');
+            var existing = document.getElementById('archive-overlay');
+            if (existing) existing.remove();
+            var existingPopup = document.getElementById('archive-popup');
+            if (existingPopup) existingPopup.remove();
+
+            var overlay = document.createElement('div');
+            overlay.id = 'archive-overlay';
+            var popup = document.createElement('div');
+            popup.id = 'archive-popup';
+            overlay.onclick = function() { overlay.remove(); popup.remove(); };
+
+            var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="color:#c9d1d9;font-size:14px;font-weight:600">Archived items (' + rows.length + ')</span><span style="cursor:pointer;color:#8b949e;font-size:18px" onclick="document.getElementById(\\'archive-overlay\\').remove();document.getElementById(\\'archive-popup\\').remove()">\u00d7</span></div>';
+            if (rows.length === 0) {
+                html += '<div style="color:#8b949e">No archived items.</div>';
+            } else {
+                rows.forEach(function(row) {
+                    var link = row.querySelector('.title-col a');
+                    var u = row.getAttribute('data-url').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                    var title = link ? link.textContent : u;
+                    html += '<div class="archive-item"><a href="' + u + '" target="_blank">' + title.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a><button class="unarchive-btn" onclick="unarchiveItem(\\'' + u.replace(/'/g,'&#39;') + '\\')">unarchive</button></div>';
+                });
+            }
+            popup.innerHTML = html;
+            document.body.appendChild(overlay);
+            document.body.appendChild(popup);
+        }
+
+        function unarchiveItem(url) {
+            var row = document.querySelector('#tab-correspondence tr[data-url="' + url.replace(/"/g, '\\\\"') + '"]');
+            if (row) {
+                row.removeAttribute('data-archived');
+                row.style.display = '';
+                updateHeadingCount(row, 1);
+                // Trigger AI processing for the restored row
+                var idx = parseInt(row.getAttribute('data-idx'));
+                if (!isNaN(idx) && !enqueued[idx]) {
+                    enqueued[idx] = true;
+                    pendingEnqueue.push(idx);
+                    if (!enqueueTimer) enqueueTimer = setTimeout(flushEnqueue, 50);
+                }
+            }
+            updateArchiveInfo(-1);
+            // Refresh the overlay
+            var ov = document.getElementById('archive-overlay');
+            var pp = document.getElementById('archive-popup');
+            if (ov) ov.remove();
+            if (pp) pp.remove();
+            var remaining = document.querySelectorAll('#tab-correspondence tr[data-archived]');
+            if (remaining.length > 0) showArchived();
+            fetch('/api/correspondence-archive', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: url, action: 'unarchive' })
+            }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.error) throw new Error(d.error);
+            });
         }
 
         // Connect to AI status stream

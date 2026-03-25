@@ -32,6 +32,16 @@ function writePeriod(val) {
   return true;
 }
 
+const ARCHIVE_FILE = join(DATA_DIR, 'correspondence-archive.json');
+function readArchive() {
+  if (existsSync(ARCHIVE_FILE)) return new Set(JSON.parse(readFileSync(ARCHIVE_FILE, 'utf8')).archived);
+  return new Set();
+}
+function writeArchive(set) {
+  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(ARCHIVE_FILE, JSON.stringify({ archived: [...set] }));
+}
+
 function periodToSince(period) {
   if (period === 'all') return null;
   const days = { '7d': 7, '30d': 30, '90d': 90 }[period] || 30;
@@ -146,6 +156,8 @@ async function handleStatusStream(req, res) {
     const commentedPRs = rawCommentedPRs.filter(pr => pr.author !== username);
     const commentedIssues = rawCommentedIssues;
 
+    const archivedUrls = readArchive();
+
     const allPRs = [
       ...myPRs.map(pr => ({ ...pr, section: 'mine' })),
       ...reviewPRs.map(pr => ({ ...pr, section: 'review' })),
@@ -190,7 +202,7 @@ async function handleStatusStream(req, res) {
     const commentedPRsForHtml = allCorrespondence.filter(i => i.section === 'commented-pr');
     const mentionedIssuesForHtml = allCorrespondence.filter(i => i.section === 'mentioned-issue');
     const commentedIssuesForHtml = allCorrespondence.filter(i => i.section === 'commented-issue');
-    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, assignedIssuesForHtml, createdIssuesForHtml, mentionedPRsForHtml, commentedPRsForHtml, mentionedIssuesForHtml, commentedIssuesForHtml, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername });
+    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, assignedIssuesForHtml, createdIssuesForHtml, mentionedPRsForHtml, commentedPRsForHtml, mentionedIssuesForHtml, commentedIssuesForHtml, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls });
 
     if (!closed) {
       res.write(`event: done\ndata: ${JSON.stringify({ html })}\n\n`);
@@ -307,6 +319,24 @@ const server = http.createServer((req, res) => {
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
+    });
+  } else if (pathname === '/api/correspondence-archive' && req.method === 'GET') {
+    const archived = [...readArchive()];
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ archived }));
+  } else if (pathname === '/api/correspondence-archive' && req.method === 'POST') {
+    handlePost(req, res, (data) => {
+      const { url, action } = data;
+      if (!url || !['archive', 'unarchive'].includes(action)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid url or action' }));
+        return;
+      }
+      const set = readArchive();
+      if (action === 'archive') set.add(url); else set.delete(url);
+      writeArchive(set);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, archivedCount: set.size }));
     });
   } else if (pathname === '/api/period' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
