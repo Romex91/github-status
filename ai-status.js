@@ -225,15 +225,13 @@ export function buildPromptForIssue(issue, ghUsername) {
 - Be specific about what action is needed if any`;
 
   const correspondenceIssueRules = `
-- My GitHub username is: ${ghUsername}
-- ALWAYS prefix usernames with @ in statusText
-- Focus ONLY on: what is the current state of the discussion involving me?
-- statusText: summarize the discussion state in 10-20 words
-- Consider emoji reactions as implicit responses (e.g. thumbs-up on a comment means acknowledgment)
+- correspondence: Your primary focus. Return a "correspondence" array of ALL relevant conversation starting from the first time ${ghUsername} appears, in chronological order. Very important to extract ALL citations so outside readers understand what happened without opening the issue.
+- statusText: if there was a response, or conversation is just hanging waiting somebody. What is the current state of the discussion involving ${ghUsername}?
+- Consider emoji reactions as implicit response (e.g. thumbs-up on a comment means acknowledgment). Mention reactions in statusText.
+- If no response yet but issue is closed, note that it's resolved
 - good: discussion resolved, my points addressed, or issue closed
 - warning: discussion ongoing, may need my input
-- bad: I was asked something and haven't responded, or my comment was ignored
-- Return a "correspondence" array of relevant comments from the thread involving me, in chronological order. Each entry: {"author":"<username>","text":"<short summary>","url":"<comment URL>"}`;
+- bad: ${ghUsername} was asked something and haven't responded, or my comment was ignored`;
 
   const mentionedIssueRules = correspondenceIssueRules;
   const commentedIssueRules = correspondenceIssueRules;
