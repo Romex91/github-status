@@ -312,7 +312,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
 <body>
     <script>(function(){var o=console.error;function banner(){if(document.body&&!document.getElementById('_err')){var d=document.createElement('div');d.id='_err';d.style.cssText='background:#3d1f1f;color:#f85149;padding:6px 12px;font-size:12px;font-family:monospace;position:sticky;top:0;z-index:999;border-bottom:1px solid #f85149';d.textContent='There are errors in dev console';document.body.prepend(d)}}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
     ${updateHtml}
-    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span id="period-wrapper" style="display:none"><select class="period-select" onchange="fetch('/api/period',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period:this.value})}).then(function(){location.reload()})">${periodOptions}</select></span> <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
+    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a></span></h1>
     <div class="nav-tabs">
         <span class="nav-tab active" data-tab="prs" onclick="switchTab('prs')">Pull Requests</span>
         <span class="nav-tab" data-tab="issues" onclick="switchTab('issues')">Issues</span>
@@ -401,7 +401,7 @@ ${createdIssueRows}
     </div>
 
     <div id="tab-correspondence" class="tab-panel">
-    <h1 class="section-heading">Correspondence</h1>
+    <h1 class="section-heading">Correspondence <select class="period-select" onchange="fetch('/api/period',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period:this.value})}).then(function(){location.reload()})">${periodOptions}</select></h1>
     <div id="archive-info" style="display:${archivedSet.size > 0 ? '' : 'none'}">
         <span id="archive-count">${archivedSet.size}</span> archived — <a onclick="showArchived()">manage</a>
     </div>
@@ -489,7 +489,6 @@ ${commentedIssueRows}
             document.querySelectorAll('.nav-tab').forEach(function(t) { t.classList.remove('active'); });
             document.getElementById('tab-' + tab).classList.add('active');
             document.querySelector('.nav-tab[data-tab="'+tab+'"]').classList.add('active');
-            document.getElementById('period-wrapper').style.display = tab === 'correspondence' ? '' : 'none';
             // Restore scroll position for new tab
             window.scrollTo(0, parseInt(sessionStorage.getItem('scrollY-' + tab)) || 0);
         }
@@ -640,15 +639,23 @@ ${commentedIssueRows}
             popup.id = 'archive-popup';
             overlay.onclick = function() { overlay.remove(); popup.remove(); };
 
-            var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="color:#c9d1d9;font-size:14px;font-weight:600">Archived items (' + rows.length + ')</span><span style="cursor:pointer;color:#8b949e;font-size:18px" onclick="document.getElementById(\\'archive-overlay\\').remove();document.getElementById(\\'archive-popup\\').remove()">\u00d7</span></div>';
-            if (rows.length === 0) {
+            var seen = {};
+            var items = [];
+            rows.forEach(function(row) {
+                var rawUrl = row.getAttribute('data-url');
+                if (seen[rawUrl]) return;
+                seen[rawUrl] = true;
+                var link = row.querySelector('.title-col a');
+                items.push({ url: rawUrl, title: link ? link.textContent : rawUrl });
+            });
+
+            var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="color:#c9d1d9;font-size:14px;font-weight:600">Archived items (' + items.length + ')</span><span style="cursor:pointer;color:#8b949e;font-size:18px" onclick="document.getElementById(\\'archive-overlay\\').remove();document.getElementById(\\'archive-popup\\').remove()">\u00d7</span></div>';
+            if (items.length === 0) {
                 html += '<div style="color:#8b949e">No archived items.</div>';
             } else {
-                rows.forEach(function(row) {
-                    var link = row.querySelector('.title-col a');
-                    var u = row.getAttribute('data-url').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-                    var title = link ? link.textContent : u;
-                    html += '<div class="archive-item"><a href="' + u + '" target="_blank">' + title.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a><button class="unarchive-btn" onclick="unarchiveItem(\\'' + u.replace(/'/g,'&#39;') + '\\')">unarchive</button></div>';
+                items.forEach(function(item) {
+                    var u = item.url.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                    html += '<div class="archive-item"><a href="' + u + '" target="_blank">' + item.title.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a><button class="unarchive-btn" onclick="unarchiveItem(\\'' + u.replace(/'/g,'&#39;') + '\\')">unarchive</button></div>';
                 });
             }
             popup.innerHTML = html;
@@ -714,7 +721,7 @@ ${commentedIssueRows}
                 var match = null;
                 for (var j = 0; j < (scan.clones || []).length; j++) {
                     var c = scan.clones[j];
-                    if (c.onPRBranch && !c.behindOrigin && !c.dirty) { match = c.path; break; }
+                    if (c.onPRBranch && !c.behindOrigin) { match = c.path; break; }
                 }
                 if (!match) return;
                 _clonePaths[idx] = match;

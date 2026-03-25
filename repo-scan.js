@@ -110,17 +110,24 @@ export async function buildCloneIndex() {
  * Look up clones for a repo from the pre-built index.
  * Derives branch-specific fields (onPRBranch, behindOrigin, etc.) from stored refs.
  */
-export function scanForClones(repo, branch, headSha, index) {
+export async function scanForClones(repo, branch, headSha, index) {
   const home = homedir();
   const matches = index.get(repo.toLowerCase()) || [];
 
-  const clones = matches.map(clone => {
+  const clones = await Promise.all(matches.map(async clone => {
     const gitDir = join(clone.path, '.git');
     const onPRBranch = branch ? clone.currentBranch === branch : false;
     const localHead = branch ? readRef(gitDir, `refs/heads/${branch}`) : null;
     const remoteHead = branch ? (headSha || readRef(gitDir, `refs/remotes/origin/${branch}`)) : null;
     const hasBranchLocally = !!localHead;
-    const behindOrigin = !!(localHead && remoteHead && localHead !== remoteHead);
+
+    // Only "behind" if origin has commits local doesn't (not when local is ahead)
+    let behindOrigin = false;
+    if (localHead && remoteHead && localHead !== remoteHead) {
+      // If remoteHead is ancestor of localHead, local is ahead — not behind
+      const isAncestor = await runCmd('git', ['merge-base', '--is-ancestor', remoteHead, localHead], { cwd: clone.path }).then(() => true, () => false);
+      behindOrigin = !isAncestor;
+    }
 
     return {
       path: clone.path,
@@ -133,7 +140,7 @@ export function scanForClones(repo, branch, headSha, index) {
       localHead,
       remoteHead,
     };
-  });
+  }));
 
   // Sort: on PR branch first, then clean, then dirty
   clones.sort((a, b) => {

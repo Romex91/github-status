@@ -275,7 +275,7 @@ const server = http.createServer((req, res) => {
 
       if (rescan) cloneIndex = await buildCloneIndex();
 
-      const scanResult = scanForClones(
+      const scanResult = await scanForClones(
         pr.repo,
         pr.isIssue ? null : (pr.details?.headRefName || null),
         pr.isIssue ? null : (pr.details?.headRefOid || null),
