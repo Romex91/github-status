@@ -126,9 +126,30 @@ export async function fetchCommentedIssues(log, since) {
 }
 
 export async function fetchIssueDetails(repo, number, signal) {
-  const raw = await gh('issue', 'view', String(number), '--repo', repo,
-    '--json', 'comments,labels,body,assignees', signal);
-  return JSON.parse(raw);
+  const [owner, name] = repo.split('/');
+  const query = `{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){issue(number:${number}){body,labels(first:20){nodes{name}},assignees(first:20){nodes{login}},comments(first:100){nodes{databaseId,body,createdAt,url,author{login},reactions(first:20){nodes{content,user{login}}}}}}}}`;
+  const raw = await gh('api', 'graphql', '-f', `query=${query}`, signal);
+  const issue = JSON.parse(raw).data.repository.issue;
+  const commentReactions = new Map();
+  const comments = (issue.comments?.nodes || []).map(c => {
+    const reactions = (c.reactions?.nodes || []);
+    if (reactions.length) {
+      const grouped = {};
+      for (const r of reactions) {
+        if (!grouped[r.content]) grouped[r.content] = [];
+        grouped[r.content].push(r.user?.login || '?');
+      }
+      commentReactions.set(c.databaseId, Object.entries(grouped).map(([k, v]) => `${k}:${v.join(',')}`).join(' '));
+    }
+    return { author: c.author, body: c.body, createdAt: c.createdAt, url: c.url };
+  });
+  return {
+    body: issue.body,
+    labels: (issue.labels?.nodes || []),
+    assignees: (issue.assignees?.nodes || []),
+    comments,
+    commentReactions,
+  };
 }
 
 export async function fetchPRSummary(repo, number, signal) {
@@ -139,13 +160,26 @@ export async function fetchPRSummary(repo, number, signal) {
 
 export async function fetchPRPromptData(repo, number, signal) {
   const [owner, name] = repo.split('/');
-  const threadsQuery = `{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){pullRequest(number:${number}){url,reviewThreads(first:100){nodes{isOutdated,comments(first:100){nodes{databaseId,path,createdAt,body,author{login},replyTo{databaseId},line,originalLine,diffHunk}}}}}}}`;
+  const threadsQuery = `{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){pullRequest(number:${number}){url,comments(first:100){nodes{databaseId,reactions(first:20){nodes{content,user{login}}}}},reviewThreads(first:100){nodes{isOutdated,comments(first:100){nodes{databaseId,path,createdAt,body,author{login},replyTo{databaseId},line,originalLine,diffHunk}}}}}}}`;
   const [diffRaw, threadsRaw] = await Promise.all([
     gh('pr', 'diff', String(number), '--repo', repo, signal),
     gh('api', 'graphql', '-f', `query=${threadsQuery}`, signal),
   ]);
   const prData = JSON.parse(threadsRaw).data.repository.pullRequest;
   const prUrl = prData.url;
+  // Build map of comment reactions with usernames
+  const commentReactions = new Map();
+  for (const c of (prData.comments?.nodes || [])) {
+    const reactions = (c.reactions?.nodes || []);
+    if (reactions.length) {
+      const grouped = {};
+      for (const r of reactions) {
+        if (!grouped[r.content]) grouped[r.content] = [];
+        grouped[r.content].push(r.user?.login || '?');
+      }
+      commentReactions.set(c.databaseId, Object.entries(grouped).map(([k, v]) => `${k}:${v.join(',')}`).join(' '));
+    }
+  }
   const threads = prData.reviewThreads.nodes;
   const reviewComments = [];
   for (const thread of threads) {
@@ -168,5 +202,6 @@ export async function fetchPRPromptData(repo, number, signal) {
   return {
     diff: diffRaw.length > 20000 ? diffRaw.slice(0, 20000) + '\n... (truncated)' : diffRaw,
     reviewComments,
+    commentReactions,
   };
 }

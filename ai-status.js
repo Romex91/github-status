@@ -10,8 +10,11 @@ function buildTimeline(d) {
   const botLogins = new Set();
 
   // Issue-level comments
+  const commentReactions = d.commentReactions || new Map();
   for (const c of (d.comments || [])) {
-    const reactions = (c.reactionGroups || []).filter(r => r.totalCount > 0).map(r => `${r.content}:${r.totalCount}`).join(' ');
+    // Extract numeric comment ID from URL (e.g. #issuecomment-12345 → 12345)
+    const commentId = c.url ? parseInt(c.url.split('-').pop()) : null;
+    const reactions = commentReactions.get(commentId) || '';
     entries.push({
       timestamp: c.createdAt,
       author: c.author?.login,
@@ -144,7 +147,7 @@ export function buildPromptForPR(pr, ghUsername) {
   const context = buildContextForPR(pr);
 
   const correspondenceRules = `
-- correspondence: Your primary focus. Return a "correspondence" array of ALL relevant conversation starting from the first time ${ghUsername} was mentioned, in chronological order. Very important to extract ALL citations so outside readers understand what happened without opening the PR.
+- correspondence: Your primary focus. Return a "correspondence" array of ALL relevant conversation starting from the first time ${ghUsername} appears, in chronological order. Very important to extract ALL citations so outside readers understand what happened without opening the PR.
 - statusText: if there was a response, or conversation is just hanging waiting somebody. What is the current state of the discussion involving ${ghUsername}?
 - Consider emoji reactions as implicit response (e.g. thumbs-up on a comment means acknowledgment). Mention reactions in statusText.
 - Consider appropriate code change as implicit response. Mention in statusText
@@ -182,10 +185,12 @@ Rules:${rules}`;
 export function buildContextForIssue(issue) {
   const d = issue.details || {};
 
+  const issueCommentReactions = d.commentReactions || new Map();
   const comments = (d.comments || [])
     .map(c => {
       const urlSuffix = c.url ? ` (comment url:${c.url})` : '';
-      const reactions = (c.reactionGroups || []).filter(r => r.totalCount > 0).map(r => `${r.content}:${r.totalCount}`).join(' ');
+      const commentId = c.url ? parseInt(c.url.split('-').pop()) : null;
+      const reactions = issueCommentReactions.get(commentId) || '';
       const reactionsSuffix = reactions ? ` reactions:${reactions}` : '';
       return `@${c.author?.login}${urlSuffix}${reactionsSuffix}:\n  ${(c.body || '').slice(0, 300).replace(/\n/g, '\n  ')}`;
     });
