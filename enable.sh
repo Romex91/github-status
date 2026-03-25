@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Preflight: verify gh CLI version >= 2.83
 echo "Checking gh CLI..."
-gh_ver=$(gh --version | grep -oP '\d+\.\d+' | head -1)
+gh_ver=$(gh --version | sed -n 's/.*version \([0-9]*\.[0-9]*\).*/\1/p' | head -1)
 gh_major=${gh_ver%%.*}
 gh_minor=${gh_ver#*.}
 if (( gh_major < 2 || (gh_major == 2 && gh_minor < 83) )); then

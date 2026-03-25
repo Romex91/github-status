@@ -424,7 +424,7 @@ ${mentionedPRRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="toggleFold(this)">My comments in PRs of other people (${visibleCommentedPRs})</h2>
+    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)}'s comments in PRs (${visibleCommentedPRs})</h2>
     <table>
         <thead>
             <tr>
@@ -458,7 +458,7 @@ ${mentionedIssueRows}
     </table>
     <hr class="subdivider">
 
-    <h2 onclick="toggleFold(this)">My comments in Issues of other people (${visibleCommentedIssues})</h2>
+    <h2 onclick="toggleFold(this)">@${escapeHtml(ghUsername)}'s comments in Issues (${visibleCommentedIssues})</h2>
     <table>
         <thead>
             <tr>

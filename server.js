@@ -161,9 +161,11 @@ async function handleStatusStream(req, res) {
     const mentionedIssues = rawMentionedIssues.filter(i => !assignedIssueUrls.has(i.html_url));
     const createdIssuesDeduped = rawCreatedIssues.filter(i => !assignedIssueUrls.has(i.html_url) && !mentionedIssues.some(m => m.html_url === i.html_url));
 
-    // Commented PRs/Issues: remove self-authored PRs (I always comment on my own)
-    const commentedPRs = rawCommentedPRs.filter(pr => pr.author !== username);
-    const commentedIssues = rawCommentedIssues;
+    // Commented PRs/Issues: remove self-authored and already-mentioned
+    const mentionedPRUrls = new Set(mentionedPRs.map(pr => pr.html_url));
+    const commentedPRs = rawCommentedPRs.filter(pr => pr.author !== username && !existingUrls.has(pr.html_url) && !mentionedPRUrls.has(pr.html_url));
+    const mentionedIssueUrls = new Set(mentionedIssues.map(i => i.html_url));
+    const commentedIssues = rawCommentedIssues.filter(i => !assignedIssueUrls.has(i.html_url) && !mentionedIssueUrls.has(i.html_url));
 
     const archivedUrls = readArchive();
 
