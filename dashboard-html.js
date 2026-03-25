@@ -283,10 +283,9 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
         .tab-panel.active { display: block; }
         .correspondence-citations { margin-top: 4px; font-size: 11px; }
         .correspondence-citations .corr-entry { margin-bottom: 4px; line-height: 1.5; }
-        .correspondence-citations .corr-q { color: #d29922; }
-        .correspondence-citations .corr-a { color: #3fb950; }
-        .correspondence-citations .corr-no-answer { color: #f85149; }
-        .correspondence-citations a { color: inherit; text-decoration: underline; }
+        .correspondence-citations .corr-author { color: #d29922; font-weight: 500; }
+        .correspondence-citations a { color: #8b949e; text-decoration: underline; }
+        .correspondence-citations a:hover { color: #c9d1d9; }
     </style>
 </head>
 <body>
@@ -689,11 +688,10 @@ ${commentedIssueRows}
                 var html = '';
                 for (var i = 0; i < d.correspondence.length; i++) {
                     var c = d.correspondence[i];
-                    var qText = (c.question || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                    var aText = (c.answer || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                    var qHtml = c.questionUrl ? '<a href="' + c.questionUrl + '" target="_blank">' + qText + '</a>' : qText;
-                    var aHtml = c.answer ? (c.answerUrl ? '<a href="' + c.answerUrl + '" target="_blank">' + aText + '</a>' : aText) : '<span class="corr-no-answer">No response yet</span>';
-                    html += '<div class="corr-entry"><span class="corr-q">Q: "' + qHtml + '"</span> → <span class="corr-a">A: ' + (c.answer ? '"' + aHtml + '"' : aHtml) + '</span></div>';
+                    var author = (c.author || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    var text = (c.text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    var textHtml = c.url ? '<a href="' + c.url + '" target="_blank">' + text + '</a>' : text;
+                    html += '<div class="corr-entry"><span class="corr-author">@' + author + ':</span> ' + textHtml + '</div>';
                 }
                 corrDiv.innerHTML = html;
             }

@@ -11,6 +11,7 @@ function buildTimeline(d) {
 
   // Issue-level comments
   for (const c of (d.comments || [])) {
+    const reactions = (c.reactionGroups || []).filter(r => r.totalCount > 0).map(r => `${r.content}:${r.totalCount}`).join(' ');
     entries.push({
       timestamp: c.createdAt,
       author: c.author?.login,
@@ -18,6 +19,7 @@ function buildTimeline(d) {
       threadId: null,
       body: c.body || '',
       url: c.url || null,
+      reactions,
     });
   }
 
@@ -62,7 +64,8 @@ function buildTimeline(d) {
       const lineSuffix = e.line ? `:${e.line}` : '';
       const path = e.path ? ` [${e.path}${lineSuffix}]` : '';
       const urlSuffix = e.url ? ` (comment url:${e.url})` : '';
-      const prefix = `[${ts}] @${e.author} [${e.type}]${id}${thread}${path}${urlSuffix}`;
+      const reactionsSuffix = e.reactions ? ` reactions:${e.reactions}` : '';
+      const prefix = `[${ts}] @${e.author} [${e.type}]${id}${thread}${path}${urlSuffix}${reactionsSuffix}`;
       const diffContext = e.diffHunk ? `\n    \`\`\` diff ${e.path}:${e.line}\n    ${e.diffHunk.split('\n').slice(-5).join('\n    ')}\n    \`\`\`` : '';
       const body = e.body.slice(0, 300).replace(/\n/g, '\n  ');
       return `${prefix}${diffContext}\n  ${body}`;
@@ -140,27 +143,21 @@ export function buildContextForPR(pr) {
 export function buildPromptForPR(pr, ghUsername) {
   const context = buildContextForPR(pr);
 
-  const commonRules = `
-- My GitHub username is: ${ghUsername}
+  const correspondenceRules = `
+- correspondence: Your primary focus. Return a "correspondence" array of ALL relevant conversation starting from the first time ${ghUsername} was mentioned, in chronological order. Very important to extract ALL citations so outside readers understand what happened without opening the PR.
+- statusText: if there was a response, or conversation is just hanging waiting somebody. What is the current state of the discussion involving ${ghUsername}?
+- Consider emoji reactions as implicit response (e.g. thumbs-up on a comment means acknowledgment). Mention reactions in statusText.
+- Consider appropriate code change as implicit response. Mention in statusText
+- good: discussion resolved, my points addressed, or PR state makes it moot
+- warning: discussion ongoing, may need my input
+- bad: ${ghUsername} was asked something and haven't responded, or my comment was ignored`;
+
+  const mentionedRules = correspondenceRules;
+  const commentedRules = correspondenceRules;
+
+  const standardRules = `
 - statusText should contain the most important details about the PR: ongoing discussions, unfixed issues, pending tasks, or if it's time to ping reviewers. Pick details that are most important for me.
-- ALWAYS prefix usernames with @ in statusText (e.g. @alice, @bob). Never write bare usernames.`;
-
-  const mentionedRules = `${commonRules}
-- For mentioned PRs: assess whether MY response or action is still needed
-- If I (${ghUsername}) have already commented or reviewed on this PR, start statusText with "RESPONDED. " and use statusClass "good"
-- good: I already responded, conversation resolved, PR merged/closed, or no action needed from me
-- warning: Conversation is ongoing and may need my input
-- bad: I was asked a question or requested an action and haven't responded
-- IMPORTANT: Also return a "correspondence" array with question/answer citations from the timeline. Each entry: {"question":"<exact quote>","questionUrl":"<comment URL>","answer":"<exact quote or null>","answerUrl":"<comment URL or null>"}. Focus on: What was I asked? Did I respond?`;
-
-  const commentedRules = `${commonRules}
-- I commented on this PR. Focus on: Did they respond to my comment? What was the question and answer?
-- good: they responded, conversation resolved
-- warning: they responded but may need follow-up
-- bad: no response to my comment yet
-- IMPORTANT: Return a "correspondence" array with question/answer citations. Each entry: {"question":"<exact quote of my question/comment>","questionUrl":"<comment URL>","answer":"<exact quote of their response or null>","answerUrl":"<comment URL or null>"}`;
-
-  const standardRules = `${commonRules}
+- ALWAYS prefix usernames with @ in statusText (e.g. @alice, @bob). Never write bare usernames.
 - Check approval requirements: reviewDecision "APPROVED" means all branch protection requirements are met. "REVIEW_REQUIRED" means approvals are still needed — mention pending reviewers by name.
 - good: Approved + CI green/no CI = ready to merge
 - warning: Awaiting review with CI passing/no CI, or approved with CI failures, or CI still running. Some questions or concerns are left unanswered. Mention who still needs to review.
@@ -170,7 +167,7 @@ export function buildPromptForPR(pr, ghUsername) {
   const isCorrespondence = pr.section === 'mentioned' || pr.section === 'commented-pr';
   const rules = pr.section === 'mentioned' ? mentionedRules : pr.section === 'commented-pr' ? commentedRules : standardRules;
   const returnShape = isCorrespondence
-    ? '{"statusText":"<description>","statusClass":"<good|warning|bad>","correspondence":[{"question":"<exact quote>","questionUrl":"<URL>","answer":"<exact quote or null>","answerUrl":"<URL or null>"}]}'
+    ? '{"statusText":"<description>","statusClass":"<good|warning|bad>","correspondence":[{"author":"<username>","text":"<comment summary>","url":"<comment URL>"}]}'
     : '{"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>","ciUrl":"<failing CI URL or null>"}';
 
   return `You are a JSON API. Analyze this GitHub PR and return ONLY a single JSON object (no markdown fences, no explanation).
@@ -188,7 +185,9 @@ export function buildContextForIssue(issue) {
   const comments = (d.comments || [])
     .map(c => {
       const urlSuffix = c.url ? ` (comment url:${c.url})` : '';
-      return `@${c.author?.login}${urlSuffix}:\n  ${(c.body || '').slice(0, 300).replace(/\n/g, '\n  ')}`;
+      const reactions = (c.reactionGroups || []).filter(r => r.totalCount > 0).map(r => `${r.content}:${r.totalCount}`).join(' ');
+      const reactionsSuffix = reactions ? ` reactions:${reactions}` : '';
+      return `@${c.author?.login}${urlSuffix}${reactionsSuffix}:\n  ${(c.body || '').slice(0, 300).replace(/\n/g, '\n  ')}`;
     });
 
   const assignees = (d.assignees || []).map(a => a.login);
@@ -220,23 +219,23 @@ export function buildPromptForIssue(issue, ghUsername) {
 - good: No action needed from me right now (waiting on others, stale/low-priority, or I already responded)
 - Be specific about what action is needed if any`;
 
-  const mentionedIssueRules = `
-- I was mentioned in this issue. Focus on: What was I asked? Did I respond?
-- bad: I was asked something and haven't responded
-- warning: Conversation is ongoing and may need my input
-- good: I already responded, or no action needed from me
-- IMPORTANT: Return a "correspondence" array with question/answer citations. Each entry: {"question":"<exact quote>","questionUrl":"<comment URL>","answer":"<exact quote or null>","answerUrl":"<comment URL or null>"}`;
+  const correspondenceIssueRules = `
+- My GitHub username is: ${ghUsername}
+- ALWAYS prefix usernames with @ in statusText
+- Focus ONLY on: what is the current state of the discussion involving me?
+- statusText: summarize the discussion state in 10-20 words
+- Consider emoji reactions as implicit responses (e.g. thumbs-up on a comment means acknowledgment)
+- good: discussion resolved, my points addressed, or issue closed
+- warning: discussion ongoing, may need my input
+- bad: I was asked something and haven't responded, or my comment was ignored
+- Return a "correspondence" array of relevant comments from the thread involving me, in chronological order. Each entry: {"author":"<username>","text":"<short summary>","url":"<comment URL>"}`;
 
-  const commentedIssueRules = `
-- I commented on this issue. Focus on: Did they respond to my comment?
-- good: they responded, conversation resolved
-- warning: they responded but may need follow-up
-- bad: no response to my comment yet
-- IMPORTANT: Return a "correspondence" array with question/answer citations. Each entry: {"question":"<exact quote of my comment>","questionUrl":"<comment URL>","answer":"<exact quote of their response or null>","answerUrl":"<comment URL or null>"}`;
+  const mentionedIssueRules = correspondenceIssueRules;
+  const commentedIssueRules = correspondenceIssueRules;
 
   const rules = issue.section === 'mentioned-issue' ? mentionedIssueRules : issue.section === 'commented-issue' ? commentedIssueRules : standardRules;
   const returnShape = isCorrespondence
-    ? '{"statusText":"<description>","statusClass":"<good|warning|bad>","correspondence":[{"question":"<exact quote>","questionUrl":"<URL>","answer":"<exact quote or null>","answerUrl":"<URL or null>"}]}'
+    ? '{"statusText":"<description>","statusClass":"<good|warning|bad>","correspondence":[{"author":"<username>","text":"<comment summary>","url":"<comment URL>"}]}'
     : '{"statusText":"<10-20 word description>","statusClass":"<good|warning|bad>"}';
 
   return `You are a JSON API. Analyze this GitHub issue and return ONLY a single JSON object (no markdown fences, no explanation).
