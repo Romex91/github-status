@@ -56,7 +56,25 @@ function readRef(gitDir, ref) {
 
 
 /**
- * Scan all git repos in ~ (depth 2) once. For each clone, read origin repo,
+ * Recursively find all git repos under a directory (no depth limit).
+ * Stops descending into a directory once a .git folder is found there.
+ */
+function findGitRepos(dir, skipDirs, gitDirs) {
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    if (!e.isDirectory() || e.name.startsWith('.') || skipDirs.has(e.name)) continue;
+    const full = join(dir, e.name);
+    if (existsSync(join(full, '.git'))) {
+      gitDirs.push(full);
+    } else {
+      findGitRepos(full, skipDirs, gitDirs);
+    }
+  }
+}
+
+/**
+ * Scan all git repos in ~ (unlimited depth) once. For each clone, read origin repo,
  * current branch, local/remote refs, and dirty status.
  * Returns a Map<repoNameLower, CloneInfo[]> for instant lookup.
  */
@@ -64,25 +82,10 @@ export async function buildCloneIndex(log) {
   const home = homedir();
   if (log) log('Scanning local git repos...', 'info');
   if (!existsSync(home)) return new Map();
-  const entries = readdirSync(home, { withFileTypes: true });
 
-  const skipDirs = new Set(['Downloads', 'Documents', 'Desktop', 'Library', 'Music', 'Movies', 'Pictures', 'Public', 'Applications']);
-  const depth1 = entries
-    .filter(e => e.isDirectory() && !e.name.startsWith('.') && !skipDirs.has(e.name))
-    .map(e => join(home, e.name));
-
+  const skipDirs = new Set(['Downloads', 'Documents', 'Desktop', 'Library', 'Music', 'Movies', 'Pictures', 'Public', 'Applications', 'node_modules', '.Trash']);
   const gitDirs = [];
-  for (const dir of depth1) {
-    if (existsSync(join(dir, '.git'))) {
-      gitDirs.push(dir);
-    } else {
-      for (const sub of readdirSync(dir, { withFileTypes: true })) {
-        if (sub.isDirectory() && !sub.name.startsWith('.') && existsSync(join(dir, sub.name, '.git'))) {
-          gitDirs.push(join(dir, sub.name));
-        }
-      }
-    }
-  }
+  findGitRepos(home, skipDirs, gitDirs);
 
   const index = new Map();
 

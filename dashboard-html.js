@@ -91,7 +91,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
       return `<td class="status-col status-bad">Fetch failed: ${escapeHtml(item.fetchError)}</td>`;
     }
     return `<td class="status-col" id="status-${globalIndex}">
-                    <span class="status-text">waiting...</span>
+                    <span class="status-text">queued...</span>
                     <br><span id="inline-actions-${globalIndex}"></span>${item.isIssue ? '' : `<span class="action-btn action-btn-accent" onclick="showRepoSelectionDialog(${globalIndex})">pick git clone</span>`}<span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
@@ -105,9 +105,9 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     return `            <tr>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
                 <td class="title-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number} ${escapeHtml(pr.title)}</a>${authorSpan}${stateSpan}</td>
-                <td class="branch-col status-loading" id="branch-${globalIndex}">waiting...</td>
+                <td class="branch-col status-loading" id="branch-${globalIndex}">queued...</td>
                 ${statusCell(pr, globalIndex)}
-                <td class="ci-col status-loading" id="ci-${globalIndex}">waiting...</td>
+                <td class="ci-col status-loading" id="ci-${globalIndex}">queued...</td>
                 <td class="days-col days-${daysClass(pr.days)}">${pr.days}d</td>
             </tr>`;
   }
@@ -148,7 +148,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     }
     const urlEsc = escapeHtml(item.html_url).replace(/'/g, '&#39;');
     return `<td class="status-col" id="status-${globalIndex}">
-                    <span class="status-text">waiting...</span>
+                    <span class="status-text">queued...</span>
                     <div class="correspondence-citations" id="corr-${globalIndex}"></div>
                     <br><span id="inline-actions-${globalIndex}"></span><span class="action-btn action-btn-archive action-btn-disabled" id="archive-btn-${globalIndex}">ARCHIVE</span><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
