@@ -34,6 +34,9 @@ function ensureStyles() {
 .dlg-empty { color:#8b949e;font-size:11px;padding:8px 0; }\
 .dlg-error { color:#f85149;font-size:11px;padding:8px 0; }\
 .dlg-dirty-files { font-size:10px;color:#8b949e;margin:2px 0 0 16px;max-height:60px;overflow-y:auto;white-space:pre; }\
+.dlg-clone-input-row { display:flex;align-items:center;gap:8px;margin-top:8px; }\
+.dlg-clone-input { flex:1;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:4px 8px;color:#c9d1d9;font-family:inherit;font-size:11px;outline:none; }\
+.dlg-clone-input:focus { border-color:#58a6ff; }\
 ';
   document.head.appendChild(s);
 }
@@ -94,11 +97,45 @@ function renderRepoSelectionDialog(dlg, data, index) {
     html += '</ul>';
   }
 
+  if (data.branch) {
+    html += '<div id="dlg-new-clone-area"></div>';
+  }
+
   html += '<div class="dlg-footer">';
+  if (data.branch) {
+    html += '<button class="dlg-btn" id="dlg-new-clone-btn">New clone\u2026</button>';
+  }
   html += '<button class="dlg-btn" data-action="cancel">Cancel</button>';
   html += '</div>';
 
   dlg.modal.innerHTML = html;
+
+  // "New clone" button reveals an input field
+  var newCloneBtn = dlg.modal.querySelector('#dlg-new-clone-btn');
+  if (newCloneBtn) {
+    newCloneBtn.onclick = function () {
+      newCloneBtn.style.display = 'none';
+      var area = dlg.modal.querySelector('#dlg-new-clone-area');
+      area.innerHTML = '<div class="dlg-clone-input-row">' +
+        '<input class="dlg-clone-input" id="dlg-clone-path" value="' + esc(data.suggestedClonePath || '') + '" />' +
+        '<button class="dlg-btn dlg-btn-primary" id="dlg-clone-confirm">Clone</button>' +
+        '</div>';
+      var input = area.querySelector('#dlg-clone-path');
+      input.focus();
+      input.select();
+      area.querySelector('#dlg-clone-confirm').onclick = function () {
+        var path = input.value.trim();
+        if (!path) return;
+        launchClone(dlg, index, path);
+      };
+      input.onkeydown = function (e) {
+        if (e.key === 'Enter') {
+          var path = input.value.trim();
+          if (path) launchClone(dlg, index, path);
+        }
+      };
+    };
+  }
 
   // Wire up sync buttons (checkout/pull)
   dlg.modal.querySelectorAll('[data-sync]').forEach(function (btn) {
@@ -192,6 +229,26 @@ function updateInlineActions(index, clonePath) {
     h += '<span class="inline-action" onclick="inlineIDE(&quot;' + cmd + '&quot;,' + index + ')">' + ides[k].name.replaceAll('&','&amp;').replaceAll('<','&lt;') + '</span>';
   }
   inlineEl.innerHTML = h;
+}
+
+function launchClone(dlg, index, clonePath) {
+  dlg.modal.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+  var statusDiv = document.createElement('div');
+  statusDiv.style.cssText = 'padding:8px 0;font-size:11px;color:#8b949e;';
+  statusDiv.innerHTML = '<span class="dlg-spinner"></span> Cloning\u2026';
+  dlg.modal.querySelector('.dlg-footer').before(statusDiv);
+
+  fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ index: index, action: 'clone', clonePath: clonePath })
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) throw new Error(d.error);
+      updateInlineActions(index, clonePath);
+      dlg.close();
+    });
 }
 
 function esc(s) {

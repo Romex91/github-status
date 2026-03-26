@@ -15,3 +15,8 @@ EXTREMELY IMPORTANT: no try-catch-swallow blocks!!!
 **Frontend:** Two layers catch everything:
 1. `onSSE` wrapper — parses JSON, checks `d.error`, calls handler. If `d.error` exists or handler throws, calls `showError`. Individual SSE handlers are pure happy path.
 2. Global `unhandledrejection` / `window.onerror` — catches fetch rejections and any uncaught throws. Fetch `.then()` chains throw on `d.error` responses, converting them to unhandled rejections.
+
+## Commit messages
+Commit messages will be shown to users in the auto-update feature.
+So make them small and relevant to changes in behavior and not in code base.
+People should quiclky understand what changed without all the internal kitchen.
