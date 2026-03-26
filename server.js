@@ -8,7 +8,7 @@ import { fetchMyPRs, fetchReviewPRs, fetchMentionedPRs, fetchAssignedIssues, fet
 import { handleAIStream } from './ai-status.js';
 import { INDEX_HTML, buildDashboardHtml } from './dashboard-html.js';
 import { launchChat } from './launch-chat.js';
-import { buildCloneIndex, scanForClones } from './repo-scan.js';
+import { buildCloneIndex, scanForClones, checkDivergence } from './repo-scan.js';
 import { detectIDEs } from './ide-detect.js';
 
 const PROJECT_DIR = new URL('.', import.meta.url).pathname;
@@ -369,6 +369,15 @@ const server = http.createServer((req, res) => {
         await runCmd('git', ['fetch', 'origin'], { cwd: clonePath });
         await runCmd('git', ['checkout', branch], { cwd: clonePath });
       } else if (action === 'pull' && branch) {
+        await runCmd('git', ['fetch', 'origin', branch], { cwd: clonePath });
+        const localHead = (await runCmd('git', ['rev-parse', `refs/heads/${branch}`], { cwd: clonePath }).catch(() => '')).trim();
+        const remoteHead = (await runCmd('git', ['rev-parse', `refs/remotes/origin/${branch}`], { cwd: clonePath }).catch(() => '')).trim();
+        if (await checkDivergence(clonePath, localHead, remoteHead) === 'diverged') {
+          cloneIndex = await buildCloneIndex();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ diverged: true }));
+          return;
+        }
         await runCmd('git', ['pull', 'origin', branch], { cwd: clonePath });
       } else {
         res.writeHead(400); res.end(JSON.stringify({ error: `Unknown sync action: ${action}` })); return;

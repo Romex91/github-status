@@ -791,7 +791,7 @@ ${commentedIssueRows}
                 var match = null;
                 for (var j = 0; j < (scan.clones || []).length; j++) {
                     var c = scan.clones[j];
-                    if (c.onPRBranch && !c.behindOrigin) { match = c.path; break; }
+                    if (c.onPRBranch && !c.behindOrigin && !c.diverged) { match = c.path; break; }
                 }
                 if (!match) return;
                 _clonePaths[idx] = match;

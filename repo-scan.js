@@ -54,6 +54,20 @@ function readRef(gitDir, ref) {
   return null;
 }
 
+/**
+ * Check if local and remote refs have diverged.
+ * Returns 'ahead' | 'behind' | 'diverged' | null (same or missing refs).
+ */
+export async function checkDivergence(cwd, localHead, remoteHead) {
+  if (!localHead || !remoteHead || localHead === remoteHead) return null;
+  // If the remote commit doesn't exist locally, we can't determine the relationship
+  const remoteExists = await runCmd('git', ['cat-file', '-t', remoteHead], { cwd }).then(() => true, () => false);
+  if (!remoteExists) return null;
+  const remoteIsAncestor = await runCmd('git', ['merge-base', '--is-ancestor', remoteHead, localHead], { cwd }).then(() => true, () => false);
+  if (remoteIsAncestor) return 'ahead';
+  const localIsAncestor = await runCmd('git', ['merge-base', '--is-ancestor', localHead, remoteHead], { cwd }).then(() => true, () => false);
+  return localIsAncestor ? 'behind' : 'diverged';
+}
 
 /**
  * Recursively find all git repos under a directory (no depth limit).
@@ -126,16 +140,16 @@ export async function scanForClones(repo, branch, headSha, index) {
     const gitDir = join(clone.path, '.git');
     const onPRBranch = branch ? clone.currentBranch === branch : false;
     const localHead = branch ? readRef(gitDir, `refs/heads/${branch}`) : null;
-    const remoteHead = branch ? (headSha || readRef(gitDir, `refs/remotes/origin/${branch}`)) : null;
+    const trackingHead = branch ? readRef(gitDir, `refs/remotes/origin/${branch}`) : null;
+    const remoteHead = branch ? (headSha || trackingHead) : null;
     const hasBranchLocally = !!localHead;
 
-    // Only "behind" if origin has commits local doesn't (not when local is ahead)
-    let behindOrigin = false;
-    if (localHead && remoteHead && localHead !== remoteHead) {
-      // If remoteHead is ancestor of localHead, local is ahead — not behind
-      const isAncestor = await runCmd('git', ['merge-base', '--is-ancestor', remoteHead, localHead], { cwd: clone.path }).then(() => true, () => false);
-      behindOrigin = !isAncestor;
-    }
+    // Use headSha for divergence check, fall back to tracking ref if it doesn't exist locally.
+    // If neither works but API says remote differs, assume behind (pull will do the real check).
+    const divergeStatus = await checkDivergence(clone.path, localHead, remoteHead)
+      ?? await checkDivergence(clone.path, localHead, trackingHead);
+    const behindOrigin = divergeStatus === 'behind' || (divergeStatus === null && localHead && remoteHead && localHead !== remoteHead);
+    const diverged = divergeStatus === 'diverged';
 
     return {
       path: clone.path,
@@ -145,6 +159,7 @@ export async function scanForClones(repo, branch, headSha, index) {
       changedFiles: clone.changedFiles,
       hasBranchLocally,
       behindOrigin,
+      diverged,
       localHead,
       remoteHead,
     };

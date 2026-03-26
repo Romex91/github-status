@@ -21,6 +21,7 @@ function ensureStyles() {
 .dlg-badge-dirty { background:#3d1f00;color:#d29922;border:1px solid #9e6a03; }\
 .dlg-badge-branch { background:#0c2d6b;color:#58a6ff;border:1px solid #1f6feb; }\
 .dlg-badge-behind { background:#3d1f00;color:#d29922;border:1px solid #9e6a03; }\
+.dlg-badge-diverged { background:#3d0a0a;color:#f85149;border:1px solid #da3633; }\
 .dlg-actions { display:flex;gap:6px;flex-shrink:0; }\
 .dlg-btn { background:none;border:1px solid #30363d;color:#c9d1d9;padding:3px 10px;border-radius:4px;font-family:inherit;font-size:11px;cursor:pointer;white-space:nowrap; }\
 .dlg-btn:hover { border-color:#58a6ff;color:#58a6ff; }\
@@ -153,6 +154,16 @@ function renderRepoSelectionDialog(dlg, data, index) {
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d.error) throw new Error(d.error);
+          if (d.diverged) {
+            var row = btn.closest('.dlg-clone-row');
+            if (row) {
+              // Re-render with diverged flag using the same renderCloneRow
+              var tmp = document.createElement('ul');
+              tmp.innerHTML = renderCloneRow({ path: clonePath, currentBranch: row.querySelector('.dlg-clone-branch').textContent.replace(/[()]/g, ''), onPRBranch: true, dirty: false, changedFiles: [], diverged: true, behindOrigin: false }, branchName);
+              row.replaceWith(tmp.firstElementChild);
+            }
+            return;
+          }
           updateInlineActions(index, clonePath);
           dlg.close();
         });
@@ -180,13 +191,17 @@ function renderCloneRow(clone, branch) {
   } else {
     html += '<span class="dlg-badge dlg-badge-clean">clean</span>';
   }
-  if (clone.behindOrigin) {
+  if (clone.diverged) {
+    html += '<span class="dlg-badge dlg-badge-diverged">diverged</span>';
+  } else if (clone.behindOrigin) {
     html += '<span class="dlg-badge dlg-badge-behind">behind</span>';
   }
 
   // Action buttons row
   html += '<div class="dlg-actions" style="width:100%;margin-top:4px">';
-  if (clone.dirty && (clone.behindOrigin || !clone.onPRBranch)) {
+  if (clone.diverged) {
+    html += '<span style="color:#f85149;font-size:10px">Local and remote branches are diverged \u2014 resolve manually</span>';
+  } else if (clone.dirty && (clone.behindOrigin || !clone.onPRBranch)) {
     html += '<span style="color:#f85149;font-size:10px">dirty \u2014 commit or stash first</span>';
   } else if (clone.behindOrigin || !clone.onPRBranch) {
     var syncLabel = !clone.onPRBranch ? 'Checkout branch' : 'Pull latest';
