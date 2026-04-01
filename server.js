@@ -166,9 +166,12 @@ async function handleStatusStream(req, res) {
   let closed = false;
   req.on('close', () => { closed = true; setCmdLogHook(null); });
 
+  const wallStart = Date.now();
+  const elapsed = () => ((Date.now() - wallStart) / 1000).toFixed(1);
+
   function log(message, type = 'info') {
     if (closed) return;
-    res.write(`event: log\ndata: ${JSON.stringify({ message, type })}\n\n`);
+    res.write(`event: log\ndata: ${JSON.stringify({ message, type, t: elapsed() })}\n\n`);
   }
 
   const home = homedir();
@@ -179,6 +182,7 @@ async function handleStatusStream(req, res) {
       ok: entry.ok, dur, cmd: entry.cmd,
       pwd: entry.pwd ? entry.pwd.replace(home, '~') : null,
       reason: entry.reason || null,
+      t: elapsed(),
     })}\n\n`);
   });
 
@@ -272,8 +276,7 @@ async function handleStatusStream(req, res) {
 
     setCmdLogHook(null);
     const cmdLog = getCommandLog();
-    const totalDuration = cmdLog.reduce((sum, e) => sum + e.duration, 0);
-    log(`Done: ${cmdLog.length} system calls, total ${(totalDuration / 1000).toFixed(1)}s`, 'success');
+    log(`Done: ${cmdLog.length} system calls`, 'success');
 
     if (!closed) {
       if (logsOnly) {

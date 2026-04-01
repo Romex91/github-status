@@ -1,4 +1,5 @@
-import { runCmd, CHAOS, CMD_TIMEOUT } from './helpers.js';
+import { runCmd, CHAOS, CMD_TIMEOUT, setCmdLogHook } from './helpers.js';
+import { homedir } from 'node:os';
 import { readCacheEntry, writeCacheEntry, hashPrompt, cleanAiCache } from './ai-cache.js';
 import { fetchIssueDetails, fetchPRSummary, fetchPRPromptData, fetchRecentComments } from './github-api.js';
 import { cleanChatPrompts } from './launch-chat.js';
@@ -284,7 +285,18 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
   });
 
   let closed = false;
-  req.on('close', () => { closed = true; onEnqueueReady(null); cleanAiCache(); cleanChatPrompts(); });
+  req.on('close', () => { closed = true; setCmdLogHook(null); onEnqueueReady(null); cleanAiCache(); cleanChatPrompts(); });
+
+  const home = homedir();
+  setCmdLogHook((entry) => {
+    if (closed) return;
+    const dur = entry.duration < 1000 ? `${entry.duration}ms` : `${(entry.duration / 1000).toFixed(1)}s`;
+    res.write(`event: syscall\ndata: ${JSON.stringify({
+      ok: entry.ok, dur, cmd: entry.cmd,
+      pwd: entry.pwd ? entry.pwd.replace(home, '~') : null,
+      reason: entry.reason || null,
+    })}\n\n`);
+  });
 
   // Badges were already rendered in the HTML; clear the list so they don't persist next reload
   if (clearAutoUnarchived) clearAutoUnarchived();

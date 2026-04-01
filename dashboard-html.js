@@ -48,13 +48,13 @@ export const INDEX_HTML = `<!DOCTYPE html>
         const sseUrl = logsOnly ? '/api/status?logs' : '/api/status';
         const eventSource = new EventSource(sseUrl);
 
-        const addLog = (msg, type) => {
+        const addLog = (msg, type, t) => {
             const line = document.createElement('div');
             line.className = 'log-line log-' + type;
-            const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
-            line.textContent = '[' + timestamp + '] ' + msg;
+            line.textContent = '[' + t + 's] ' + msg;
             logsEl.appendChild(line);
             window.scrollTo(0, document.body.scrollHeight);
+            console.log('[' + t + 's] ' + msg);
         };
 
         const onSSE = (source, eventName, handler) => {
@@ -65,22 +65,24 @@ export const INDEX_HTML = `<!DOCTYPE html>
             });
         };
 
-        onSSE(eventSource, 'log', data => addLog(data.message, data.type));
+        onSSE(eventSource, 'log', data => addLog(data.message, data.type, data.t || '0.0'));
         onSSE(eventSource, 'syscall', data => {
             const line = document.createElement('div');
             line.className = 'log-line';
-            const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
             const statusColor = data.ok ? '#3fb950' : '#f85149';
-            line.innerHTML = '<span style="color:#484f58">[' + ts + ']</span> '
+            const prefix = '[' + data.t + 's] ';
+            line.innerHTML = '<span style="color:#484f58">' + prefix + '</span>'
                 + '<span style="color:' + statusColor + '">[' + (data.ok ? 'OK' : 'FAIL') + ' ' + data.dur + ']</span>'
                 + (data.pwd ? ' <span style="color:#484f58">pwd=' + data.pwd + '</span>' : '')
                 + ' <span style="color:#c9d1d9">' + data.cmd.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>'
                 + (data.reason ? ' <span style="color:#6e7681">(' + data.reason.replace(/&/g,'&amp;').replace(/</g,'&lt;') + ')</span>' : '');
             logsEl.appendChild(line);
             window.scrollTo(0, document.body.scrollHeight);
+            console.log(prefix + '[' + (data.ok ? 'OK' : 'FAIL') + ' ' + data.dur + ']' + (data.pwd ? ' pwd=' + data.pwd : '') + ' ' + data.cmd + (data.reason ? ' (' + data.reason + ')' : ''));
         });
         onSSE(eventSource, 'done', data => {
             eventSource.close();
+            console.log('RENDERING MAIN HTML');
             document.open();
             document.write(data.html);
             document.close();
@@ -856,6 +858,10 @@ ${commentedIssueRows}
                 handler(data);
             });
         };
+
+        onSSE(eventSource, 'syscall', data => {
+            console.log('[' + (data.ok ? 'OK' : 'FAIL') + ' ' + data.dur + ']' + (data.pwd ? ' pwd=' + data.pwd : '') + ' ' + data.cmd + (data.reason ? ' (' + data.reason + ')' : ''));
+        });
 
         const pendingScanQueue = [];
         let scanRunning = false;

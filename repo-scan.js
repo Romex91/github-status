@@ -101,22 +101,27 @@ export async function buildCloneIndex(log) {
   const gitDirs = [];
   findGitRepos(home, skipDirs, gitDirs);
 
-  const index = new Map();
-
+  const repos = [];
   for (const dir of gitDirs) {
     const gitDir = join(dir, '.git');
     const originUrl = readOriginUrl(gitDir);
     if (!originUrl) continue;
     const remoteRepo = extractRepoFromRemote(originUrl);
     if (!remoteRepo) continue;
+    repos.push({ dir, gitDir, remoteRepo });
+  }
 
+  const results = await Promise.all(repos.map(async ({ dir, gitDir, remoteRepo }) => {
     if (log) log(`  scanning ${dir.replace(home, '~')} → ${remoteRepo}`, 'info');
-
     const currentBranch = readCurrentBranch(gitDir);
     const status = await runCmd('git', ['status', '--porcelain'], { cwd: dir, reason: `dirty check: ${remoteRepo}` });
     const dirty = !!status;
     const changedFiles = status ? status.split('\n') : [];
+    return { remoteRepo, dir, currentBranch, dirty, changedFiles };
+  }));
 
+  const index = new Map();
+  for (const { remoteRepo, dir, currentBranch, dirty, changedFiles } of results) {
     const key = remoteRepo.toLowerCase();
     if (!index.has(key)) index.set(key, []);
     index.get(key).push({ path: dir, currentBranch, dirty, changedFiles });
