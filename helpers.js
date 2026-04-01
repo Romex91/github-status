@@ -10,7 +10,7 @@ export function runCmd(bin, args, { stdin, env: cmdEnv, signal, cwd } = {}) {
   console.log(`runCmd > ${cmd}`);
   let shellBin = bin, shellArgs = args;
   if (CHAOS) {
-    const escaped = args.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+    const escaped = args.map(arg => `'${arg.replace(/'/g, "'\\''")}'`).join(' ');
     shellBin = 'sh';
     shellArgs = ['-c', `./bin/chaotic-testing && ${bin} ${escaped}`];
   }
@@ -23,8 +23,8 @@ export function runCmd(bin, args, { stdin, env: cmdEnv, signal, cwd } = {}) {
     signal?.addEventListener('abort', onAbort, { once: true });
     if (stdin) { child.stdin.write(stdin); child.stdin.end(); }
     let stdout = '', stderr = '';
-    child.stdout.on('data', (c) => { stdout += c; });
-    child.stderr.on('data', (c) => { stderr += c; });
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.on('close', (code) => {
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
@@ -58,8 +58,8 @@ export function daysClass(days) {
 }
 
 export function todayStr() {
-  const d = new Date();
-  const offset = d.getTimezoneOffset();
-  d.setMinutes(d.getMinutes() - offset);
-  return d.toISOString().slice(0, 16).replace('T', ' ');
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+  now.setMinutes(now.getMinutes() - offset);
+  return now.toISOString().slice(0, 16).replace('T', ' ');
 }

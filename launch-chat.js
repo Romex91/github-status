@@ -16,8 +16,8 @@ export function cleanChatPrompts(maxAgeDays = 1) {
   for (const file of readdirSync(PROMPTS_DIR)) {
     const filePath = join(PROMPTS_DIR, file);
     if (!existsSync(filePath)) continue;
-    const st = statSync(filePath);
-    if (st.mtimeMs < cutoff) {
+    const fileStat = statSync(filePath);
+    if (fileStat.mtimeMs < cutoff) {
       unlinkSync(filePath);
       removed++;
     }
@@ -113,7 +113,7 @@ ${prompt}
         }
       }
       if (!launched) {
-        throw new Error('No supported terminal emulator found. Tried: ' + terminals.map(t => t[0]).join(', '));
+        throw new Error('No supported terminal emulator found. Tried: ' + terminals.map(term => term[0]).join(', '));
       }
     }
   }

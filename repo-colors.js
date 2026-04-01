@@ -22,7 +22,7 @@ export function updateRepoColors(repoNames) {
   const saved = loadRepoColors();
   const allRepos = [...new Set([...Object.keys(saved), ...repoNames])].sort();
   const map = {};
-  allRepos.forEach((name, i) => { map[name] = REPO_COLORS[i % REPO_COLORS.length]; });
+  allRepos.forEach((name, idx) => { map[name] = REPO_COLORS[idx % REPO_COLORS.length]; });
   saveRepoColors(map);
   return map;
 }

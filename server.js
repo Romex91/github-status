@@ -95,13 +95,13 @@ function periodToSince(period) {
 process.on('unhandledRejection', (reason) => console.error('Unhandled rejection:', reason));
 
 const installedIDEs = await detectIDEs();
-console.log(`Detected IDEs: ${installedIDEs.map(i => i.name).join(', ') || 'none'}`);
+console.log(`Detected IDEs: ${installedIDEs.map(ide => ide.name).join(', ') || 'none'}`);
 
 // Capture tool versions at startup for error diagnostics
 let ghVersion = 'unknown';
 let claudeVersion = 'unknown';
-runCmd('gh', ['--version']).then(v => { ghVersion = v.match(/\d+\.\d+\.\d+/)?.[0] || v.trim(); });
-runCmd('claude', ['--version']).then(v => { claudeVersion = v.trim(); });
+runCmd('gh', ['--version']).then(version => { ghVersion = version.match(/\d+\.\d+\.\d+/)?.[0] || version.trim(); });
+runCmd('claude', ['--version']).then(version => { claudeVersion = version.trim(); });
 
 // Store PR data between phases
 let pendingPRData = null;
@@ -112,18 +112,18 @@ let cloneIndex = null;
 
 // === Utilities ===
 
-function handlePost(req, res, fn) {
+function handlePost(req, res, handler) {
   let body = '';
-  req.on('data', c => body += c);
+  req.on('data', chunk => body += chunk);
   req.on('end', async () => {
     // eslint-disable-next-line no-restricted-syntax -- top-level POST handler: catches all errors and sends { error } as HTTP 500 to FE
     try {
-      await fn(JSON.parse(body));
-    } catch (e) {
-      console.error(`${req.url} failed:`, e);
+      await handler(JSON.parse(body));
+    } catch (err) {
+      console.error(`${req.url} failed:`, err);
       if (!res.headersSent) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: e.message }));
+        res.end(JSON.stringify({ error: err.message }));
       }
     }
   });
@@ -139,7 +139,7 @@ async function checkForUpdates() {
     const behind = parseInt(await runCmd('git', ['rev-list', '--count', `${local}..${remote}`]));
     if (behind > 0) {
       const log = await runCmd('git', ['log', '--format=%h %s%n%b%n---', `${local}..${remote}`]);
-      const commits = log.split('\n---\n').map(l => l.trim()).filter(Boolean);
+      const commits = log.split('\n---\n').map(line => line.trim()).filter(Boolean);
       return { behind, local: local.slice(0, 7), remote: remote.slice(0, 7), commits };
     }
     const ahead = parseInt(await runCmd('git', ['rev-list', '--count', `${remote}..${local}`]));
@@ -177,7 +177,7 @@ async function handleStatusStream(req, res) {
       fetchMyPRs(log),
       fetchReviewPRs(log),
       fetchMentionedPRs(log, sinceQuery),
-      gh('api', 'user', '--jq', '.login').then(s => s.trim()),
+      gh('api', 'user', '--jq', '.login').then(login => login.trim()),
       fetchAssignedIssues(log),
       fetchMentionedIssues(log, sinceQuery),
       fetchCreatedIssues(log),
@@ -197,15 +197,15 @@ async function handleStatusStream(req, res) {
     }
 
     // Deduplicate issues: remove mentioned/created that overlap with assigned
-    const assignedIssueUrls = new Set(assignedIssues.map(i => i.html_url));
-    const mentionedIssues = rawMentionedIssues.filter(i => !assignedIssueUrls.has(i.html_url));
-    const createdIssuesDeduped = rawCreatedIssues.filter(i => !assignedIssueUrls.has(i.html_url) && !mentionedIssues.some(m => m.html_url === i.html_url));
+    const assignedIssueUrls = new Set(assignedIssues.map(issue => issue.html_url));
+    const mentionedIssues = rawMentionedIssues.filter(issue => !assignedIssueUrls.has(issue.html_url));
+    const createdIssuesDeduped = rawCreatedIssues.filter(issue => !assignedIssueUrls.has(issue.html_url) && !mentionedIssues.some(mentioned => mentioned.html_url === issue.html_url));
 
     // Commented PRs/Issues: remove self-authored and already-mentioned
     const mentionedPRUrls = new Set(mentionedPRs.map(pr => pr.html_url));
     const commentedPRs = rawCommentedPRs.filter(pr => pr.author !== username && !existingUrls.has(pr.html_url) && !mentionedPRUrls.has(pr.html_url));
-    const mentionedIssueUrls = new Set(mentionedIssues.map(i => i.html_url));
-    const commentedIssues = rawCommentedIssues.filter(i => !assignedIssueUrls.has(i.html_url) && !mentionedIssueUrls.has(i.html_url));
+    const mentionedIssueUrls = new Set(mentionedIssues.map(issue => issue.html_url));
+    const commentedIssues = rawCommentedIssues.filter(issue => !assignedIssueUrls.has(issue.html_url) && !mentionedIssueUrls.has(issue.html_url));
 
     const archivedUrls = readArchive();
 
@@ -215,15 +215,15 @@ async function handleStatusStream(req, res) {
     ];
 
     const allIssues = [
-      ...assignedIssues.map(i => ({ ...i, section: 'assigned-issue', isIssue: true })),
-      ...createdIssuesDeduped.map(i => ({ ...i, section: 'created-issue', isIssue: true })),
+      ...assignedIssues.map(issue => ({ ...issue, section: 'assigned-issue', isIssue: true })),
+      ...createdIssuesDeduped.map(issue => ({ ...issue, section: 'created-issue', isIssue: true })),
     ];
 
     const allCorrespondence = [
       ...mentionedPRs.map(pr => ({ ...pr, section: 'mentioned' })),
       ...commentedPRs.map(pr => ({ ...pr, section: 'commented-pr' })),
-      ...mentionedIssues.map(i => ({ ...i, section: 'mentioned-issue', isIssue: true })),
-      ...commentedIssues.map(i => ({ ...i, section: 'commented-issue', isIssue: true })),
+      ...mentionedIssues.map(issue => ({ ...issue, section: 'mentioned-issue', isIssue: true })),
+      ...commentedIssues.map(issue => ({ ...issue, section: 'commented-issue', isIssue: true })),
     ];
 
     allPRs.forEach(pr => { pr.days = daysSince(pr.updated_at); });
@@ -237,18 +237,18 @@ async function handleStatusStream(req, res) {
     pendingPRData = allItems;
 
     // Update persistent repo color assignments
-    const allRepoNames = [...new Set(allItems.map(i => i.repo.split('/').pop()))];
+    const allRepoNames = [...new Set(allItems.map(item => item.repo.split('/').pop()))];
     repoColorMap = updateRepoColors(allRepoNames);
 
     const date = todayStr();
     const myPRsForHtml = allPRs.filter(pr => pr.section === 'mine');
     const reviewPRsForHtml = allPRs.filter(pr => pr.section === 'review');
-    const assignedIssuesForHtml = allIssues.filter(i => i.section === 'assigned-issue');
-    const createdIssuesForHtml = allIssues.filter(i => i.section === 'created-issue');
-    const mentionedPRsForHtml = allCorrespondence.filter(i => i.section === 'mentioned');
-    const commentedPRsForHtml = allCorrespondence.filter(i => i.section === 'commented-pr');
-    const mentionedIssuesForHtml = allCorrespondence.filter(i => i.section === 'mentioned-issue');
-    const commentedIssuesForHtml = allCorrespondence.filter(i => i.section === 'commented-issue');
+    const assignedIssuesForHtml = allIssues.filter(issue => issue.section === 'assigned-issue');
+    const createdIssuesForHtml = allIssues.filter(issue => issue.section === 'created-issue');
+    const mentionedPRsForHtml = allCorrespondence.filter(item => item.section === 'mentioned');
+    const commentedPRsForHtml = allCorrespondence.filter(item => item.section === 'commented-pr');
+    const mentionedIssuesForHtml = allCorrespondence.filter(item => item.section === 'mentioned-issue');
+    const commentedIssuesForHtml = allCorrespondence.filter(item => item.section === 'commented-issue');
     const autoUnarchivedUrls = readAutoUnarchived();
     const unimportantUrls = readUnimportant();
     const markedImportantUrls = readMarkedImportant();
@@ -286,14 +286,14 @@ const server = http.createServer((req, res) => {
       ghUsername,
       ghVersion,
       claudeVersion,
-      onEnqueueReady: (fn) => { enqueueAIItems = fn; },
+      onEnqueueReady: (callback) => { enqueueAIItems = callback; },
       archivedUrls: readArchive(),
       onAutoUnarchive: (url) => {
         const map = readArchive();
         delete map[url];
         writeArchive(map);
-        const au = readAutoUnarchived();
-        if (!au.includes(url)) { au.push(url); writeAutoUnarchived(au); }
+        const autoUnarchived = readAutoUnarchived();
+        if (!autoUnarchived.includes(url)) { autoUnarchived.push(url); writeAutoUnarchived(autoUnarchived); }
       },
       clearAutoUnarchived: () => writeAutoUnarchived([]),
       onMarkUnimportant: (url, title, lastCommentAt) => {
@@ -307,8 +307,8 @@ const server = http.createServer((req, res) => {
         const map = readUnimportant();
         delete map[url];
         writeUnimportant(map);
-        const mi = readMarkedImportant().filter(u => u !== url);
-        writeMarkedImportant(mi);
+        const markedImportant = readMarkedImportant().filter(itemUrl => itemUrl !== url);
+        writeMarkedImportant(markedImportant);
       },
     });
   } else if (pathname === '/api/ai-enqueue' && req.method === 'POST') {
@@ -393,7 +393,7 @@ const server = http.createServer((req, res) => {
   } else if (pathname === '/api/open-ide' && req.method === 'POST') {
     handlePost(req, res, (data) => {
       const { cmd, clonePath } = data;
-      const ide = installedIDEs.find(i => i.cmd === cmd);
+      const ide = installedIDEs.find(entry => entry.cmd === cmd);
       if (!ide) { res.writeHead(400); res.end(JSON.stringify({ error: `IDE "${cmd}" not found.` })); return; }
       if (!clonePath) { res.writeHead(400); res.end(JSON.stringify({ error: 'No clone path provided.' })); return; }
 
@@ -417,8 +417,8 @@ const server = http.createServer((req, res) => {
       const map = readArchive();
       if (action === 'archive') {
         map[url] = { title: title || url, lastCommentAt: lastCommentAt || null };
-        const au = readAutoUnarchived().filter(u => u !== url);
-        writeAutoUnarchived(au);
+        const autoUnarchived = readAutoUnarchived().filter(itemUrl => itemUrl !== url);
+        writeAutoUnarchived(autoUnarchived);
       } else {
         delete map[url];
       }
@@ -441,8 +441,8 @@ const server = http.createServer((req, res) => {
       const map = readUnimportant();
       delete map[url];
       writeUnimportant(map);
-      const mi = readMarkedImportant();
-      if (!mi.includes(url)) { mi.push(url); writeMarkedImportant(mi); }
+      const markedImportant = readMarkedImportant();
+      if (!markedImportant.includes(url)) { markedImportant.push(url); writeMarkedImportant(markedImportant); }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, unimportantCount: Object.keys(map).length }));
     });

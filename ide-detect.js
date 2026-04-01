@@ -22,7 +22,7 @@ const IDE_CANDIDATES = [
 export async function detectIDEs() {
   const macApps = new Set();
   if (process.platform === 'darwin' && existsSync('/Applications')) {
-    for (const e of readdirSync('/Applications')) macApps.add(e);
+    for (const entry of readdirSync('/Applications')) macApps.add(entry);
   }
 
   const whichCmd = process.platform === 'win32' ? 'where' : 'which';

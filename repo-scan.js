@@ -8,8 +8,8 @@ import { runCmd } from './helpers.js';
  * Handles https://github.com/org/repo.git, git@github.com:org/repo.git, etc.
  */
 function extractRepoFromRemote(remote) {
-  const m = remote.match(/[:\/]([^/]+\/[^/]+?)(?:\.git)?$/);
-  return m ? m[1] : null;
+  const match = remote.match(/[:\/]([^/]+\/[^/]+?)(?:\.git)?$/);
+  return match ? match[1] : null;
 }
 
 /**
@@ -19,8 +19,8 @@ function readOriginUrl(gitDir) {
   const configPath = join(gitDir, 'config');
   if (!existsSync(configPath)) return null;
   const config = readFileSync(configPath, 'utf8');
-  const m = config.match(/\[remote "origin"\][^\[]*?url\s*=\s*(.+)/);
-  return m ? m[1].trim() : null;
+  const match = config.match(/\[remote "origin"\][^\[]*?url\s*=\s*(.+)/);
+  return match ? match[1].trim() : null;
 }
 
 /**
@@ -31,8 +31,8 @@ function readCurrentBranch(gitDir) {
   const headPath = join(gitDir, 'HEAD');
   if (!existsSync(headPath)) return null;
   const head = readFileSync(headPath, 'utf8').trim();
-  const m = head.match(/^ref: refs\/heads\/(.+)$/);
-  return m ? m[1] : null;
+  const match = head.match(/^ref: refs\/heads\/(.+)$/);
+  return match ? match[1] : null;
 }
 
 /**
@@ -47,8 +47,8 @@ function readRef(gitDir, ref) {
   const packedPath = join(gitDir, 'packed-refs');
   if (existsSync(packedPath)) {
     const packed = readFileSync(packedPath, 'utf8');
-    const m = packed.match(new RegExp(`^([0-9a-f]{40})\\s+${ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'm'));
-    return m ? m[1] : null;
+    const match = packed.match(new RegExp(`^([0-9a-f]{40})\\s+${ref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'm'));
+    return match ? match[1] : null;
   }
 
   return null;

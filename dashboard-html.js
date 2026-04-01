@@ -28,10 +28,10 @@ export const INDEX_HTML = `<!DOCTYPE html>
     <script>
         {
             const origError = console.error;
-            const showBanner = () => { const el = document.getElementById('_err'); if (el) el.style.display = ''; };
+            const showBanner = () => { const banner = document.getElementById('_err'); if (banner) banner.style.display = ''; };
             console.error = (...args) => { origError.apply(console, args); showBanner(); setTimeout(showBanner, 0); };
-            window.onerror = (m, s, l, c, e) => { origError.call(console, e || m); showBanner(); setTimeout(showBanner, 0); };
-            window.addEventListener('unhandledrejection', e => console.error(e.reason));
+            window.onerror = (msg, src, line, col, err) => { origError.call(console, err || msg); showBanner(); setTimeout(showBanner, 0); };
+            window.addEventListener('unhandledrejection', event => console.error(event.reason));
         }
     </script>
     <h1>
@@ -43,39 +43,39 @@ export const INDEX_HTML = `<!DOCTYPE html>
     <div id="logs"></div>
     <script>
     {
-        const logs = document.getElementById('logs');
-        const es = new EventSource('/api/status');
+        const logsEl = document.getElementById('logs');
+        const eventSource = new EventSource('/api/status');
 
         const addLog = (msg, type) => {
             const line = document.createElement('div');
             line.className = 'log-line log-' + type;
-            const t = new Date().toLocaleTimeString('en-US', { hour12: false });
-            line.textContent = '[' + t + '] ' + msg;
-            logs.appendChild(line);
+            const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+            line.textContent = '[' + timestamp + '] ' + msg;
+            logsEl.appendChild(line);
             window.scrollTo(0, document.body.scrollHeight);
         };
 
-        const onSSE = (source, event, handler) => {
-            source.addEventListener(event, e => {
-                const data = JSON.parse(e.data);
+        const onSSE = (source, eventName, handler) => {
+            source.addEventListener(eventName, event => {
+                const data = JSON.parse(event.data);
                 if (data.error) { console.error(data.error); return; }
                 handler(data);
             });
         };
 
-        onSSE(es, 'log', data => addLog(data.message, data.type));
-        onSSE(es, 'done', data => {
-            es.close();
+        onSSE(eventSource, 'log', data => addLog(data.message, data.type));
+        onSSE(eventSource, 'done', data => {
+            eventSource.close();
             document.open();
             document.write(data.html);
             document.close();
             window.scrollTo(0, 0);
         });
-        onSSE(es, 'fatal', () => {});
+        onSSE(eventSource, 'fatal', () => {});
 
-        es.onerror = () => {
-            if (es.readyState === EventSource.CLOSED) return;
-            es.close();
+        eventSource.onerror = () => {
+            if (eventSource.readyState === EventSource.CLOSED) return;
+            eventSource.close();
             console.error('Status stream connection lost');
         };
 
@@ -152,8 +152,8 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
 
   let updateHtml = '';
   if (updateInfo && updateInfo.behind) {
-    const commitItems = updateInfo.commits.map(c => {
-      const lines = c.split('\n');
+    const commitItems = updateInfo.commits.map(commit => {
+      const lines = commit.split('\n');
       const title = lines[0];
       const body = lines.slice(1).join('\n').trim();
       return `<li>
@@ -218,8 +218,8 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
   }
 
   const periodLabels = { '7d': '7 days', '30d': '30 days', '90d': '3 months', 'all': 'All time' };
-  const periodOptions = ['7d', '30d', '90d', 'all'].map(v =>
-    `<option value="${v}"${v === period ? ' selected' : ''}>${periodLabels[v]}</option>`
+  const periodOptions = ['7d', '30d', '90d', 'all'].map(value =>
+    `<option value="${value}"${value === period ? ' selected' : ''}>${periodLabels[value]}</option>`
   ).join('');
 
   let idx = 0;
@@ -233,10 +233,10 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
   const commentedIssueRows = commentedIssues.map(i => correspondenceRow(i, false, idx++, false)).join('\n');
 
   const hiddenSet = new Set([...archivedSet, ...unimportantSet]);
-  const visibleMentionedPRs = mentionedPRs.filter(p => !hiddenSet.has(p.html_url)).length;
-  const visibleCommentedPRs = commentedPRs.filter(p => !hiddenSet.has(p.html_url)).length;
-  const visibleMentionedIssues = mentionedIssues.filter(i => !hiddenSet.has(i.html_url)).length;
-  const visibleCommentedIssues = commentedIssues.filter(i => !hiddenSet.has(i.html_url)).length;
+  const visibleMentionedPRs = mentionedPRs.filter(pr => !hiddenSet.has(pr.html_url)).length;
+  const visibleCommentedPRs = commentedPRs.filter(pr => !hiddenSet.has(pr.html_url)).length;
+  const visibleMentionedIssues = mentionedIssues.filter(issue => !hiddenSet.has(issue.html_url)).length;
+  const visibleCommentedIssues = commentedIssues.filter(issue => !hiddenSet.has(issue.html_url)).length;
   const totalCorrespondence = visibleMentionedPRs + visibleCommentedPRs + visibleMentionedIssues + visibleCommentedIssues;
 
   return `<!DOCTYPE html>
@@ -369,10 +369,10 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     <script>
         {
             const origError = console.error;
-            const showBanner = () => { const el = document.getElementById('_err'); if (el) el.style.display = ''; };
+            const showBanner = () => { const banner = document.getElementById('_err'); if (banner) banner.style.display = ''; };
             console.error = (...args) => { origError.apply(console, args); showBanner(); setTimeout(showBanner, 0); };
-            window.onerror = (m, s, l, c, e) => { origError.call(console, e || m); showBanner(); setTimeout(showBanner, 0); };
-            window.addEventListener('unhandledrejection', e => console.error(e.reason));
+            window.onerror = (msg, src, line, col, err) => { origError.call(console, err || msg); showBanner(); setTimeout(showBanner, 0); };
+            window.addEventListener('unhandledrejection', event => console.error(event.reason));
         }
     </script>
     ${updateHtml}
@@ -568,8 +568,8 @@ ${commentedIssueRows}
             sessionStorage.setItem('scrollY-' + _activeTab, window.scrollY);
             _activeTab = tab;
             localStorage.setItem('activeTab', tab);
-            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+            document.querySelectorAll('.nav-tab').forEach(tab => tab.classList.remove('active'));
             document.getElementById('tab-' + tab).classList.add('active');
             document.querySelector('.nav-tab[data-tab="'+tab+'"]').classList.add('active');
             window.scrollTo(0, parseInt(sessionStorage.getItem('scrollY-' + tab)) || 0);
@@ -579,7 +579,7 @@ ${commentedIssueRows}
             document.querySelectorAll('.tab-panel').forEach(panel => {
                 const tab = panel.id.replace('tab-', '');
                 const state = [];
-                panel.querySelectorAll('h2').forEach(h => state.push(h.classList.contains('folded')));
+                panel.querySelectorAll('h2').forEach(heading => state.push(heading.classList.contains('folded')));
                 localStorage.setItem('foldState-' + tab, JSON.stringify(state));
             });
         };
@@ -589,8 +589,8 @@ ${commentedIssueRows}
                 const raw = localStorage.getItem('foldState-' + tab);
                 if (!raw) return;
                 const state = JSON.parse(raw);
-                panel.querySelectorAll('h2').forEach((h, i) => {
-                    if (state[i]) h.classList.add('folded');
+                panel.querySelectorAll('h2').forEach((heading, idx) => {
+                    if (state[idx]) heading.classList.add('folded');
                 });
             });
         };
@@ -600,12 +600,12 @@ ${commentedIssueRows}
         }
         function foldAll() {
             const panel = document.getElementById('tab-' + _activeTab);
-            panel.querySelectorAll('h2').forEach(h => h.classList.add('folded'));
+            panel.querySelectorAll('h2').forEach(heading => heading.classList.add('folded'));
             saveFoldState();
         }
         function unfoldAll() {
             const panel = document.getElementById('tab-' + _activeTab);
-            panel.querySelectorAll('h2').forEach(h => h.classList.remove('folded'));
+            panel.querySelectorAll('h2').forEach(heading => heading.classList.remove('folded'));
             saveFoldState();
         }
         restoreFoldState();
@@ -620,10 +620,10 @@ ${commentedIssueRows}
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ index, action: 'chat-here', clonePath: _clonePaths[index] || '' })
-            }).then(r => r.json()).then(d => {
-                if (d.error) throw new Error(d.error);
-                const el = document.getElementById('inline-actions-' + index);
-                if (el) showCopyToast(el, 'opened terminal window');
+            }).then(resp => resp.json()).then(data => {
+                if (data.error) throw new Error(data.error);
+                const actionsEl = document.getElementById('inline-actions-' + index);
+                if (actionsEl) showCopyToast(actionsEl, 'opened terminal window');
             });
         }
         function inlineIDE(cmd, index) {
@@ -631,8 +631,8 @@ ${commentedIssueRows}
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ cmd, clonePath: _clonePaths[index] || '' })
-            }).then(r => r.json()).then(d => {
-                if (d.error) throw new Error(d.error);
+            }).then(resp => resp.json()).then(data => {
+                if (data.error) throw new Error(data.error);
             });
         }
 
@@ -775,7 +775,7 @@ ${commentedIssueRows}
         function unarchiveItem(url) {
             restoreItem(url, {
                 apiUrl: '/api/correspondence-archive',
-                postBody: u => ({ url: u, action: 'unarchive' }),
+                postBody: itemUrl => ({ url: itemUrl, action: 'unarchive' }),
                 attrs: ['data-archived'],
                 infoPrefix: 'archive',
                 remainingKey: 'archivedCount',
@@ -786,7 +786,7 @@ ${commentedIssueRows}
         function markImportant(url) {
             restoreItem(url, {
                 apiUrl: '/api/correspondence-unimportant',
-                postBody: u => ({ url: u, action: 'mark-important' }),
+                postBody: itemUrl => ({ url: itemUrl, action: 'mark-important' }),
                 attrs: ['data-unimportant'],
                 infoPrefix: 'unimportant',
                 remainingKey: 'unimportantCount',
@@ -827,12 +827,12 @@ ${commentedIssueRows}
 
 
         // Connect to AI status stream
-        const es = new EventSource('/api/ai-stream');
+        const eventSource = new EventSource('/api/ai-stream');
         const phaseTimers = {};
 
-        const onSSE = (source, event, handler) => {
-            source.addEventListener(event, e => {
-                const data = JSON.parse(e.data);
+        const onSSE = (source, eventName, handler) => {
+            source.addEventListener(eventName, event => {
+                const data = JSON.parse(event.data);
                 if (data.error) { console.error(data.error); return; }
                 handler(data);
             });
@@ -871,7 +871,7 @@ ${commentedIssueRows}
             });
         }
 
-        onSSE(es, 'ai-phase', data => {
+        onSSE(eventSource, 'ai-phase', data => {
             const cell = document.getElementById('status-' + data.index);
             if (!cell) return;
             const statusSpan = cell.querySelector('.status-text');
@@ -890,7 +890,7 @@ ${commentedIssueRows}
             phaseTimers[data.index] = setInterval(update, 1000);
         });
 
-        onSSE(es, 'pr-details', data => {
+        onSSE(eventSource, 'pr-details', data => {
             const branchCell = document.getElementById('branch-' + data.index);
             if (branchCell) {
                 branchCell.classList.remove('status-loading');
@@ -918,14 +918,14 @@ ${commentedIssueRows}
             pendingScanQueue.push(data.index); drainScanQueue();
         });
 
-        onSSE(es, 'ai-log', data => {
+        onSSE(eventSource, 'ai-log', data => {
             const logEl = document.getElementById('ai-log-' + data.index);
             logEl.textContent += data.text;
             const tooltip = document.getElementById('prompt-tooltip-' + data.index);
             if (tooltip) tooltip.textContent = logEl.textContent;
         });
 
-        onSSE(es, 'ai-done', data => {
+        onSSE(eventSource, 'ai-done', data => {
             if (phaseTimers[data.index]) { clearInterval(phaseTimers[data.index]); delete phaseTimers[data.index]; }
             const cell = document.getElementById('status-' + data.index);
             if (data.lastCommentAt) {
@@ -970,7 +970,7 @@ ${commentedIssueRows}
             }
         });
 
-        onSSE(es, 'ai-error', () => {});
+        onSSE(eventSource, 'ai-error', () => {});
 
         function handleNewComments(url, opts) {
             const rows = document.querySelectorAll('#tab-correspondence tr[data-url="' + url.replace(/"/g, '\\\\"') + '"]');
@@ -990,7 +990,7 @@ ${commentedIssueRows}
             updateCorrespondenceTab();
         }
 
-        onSSE(es, 'auto-unarchive', data => {
+        onSSE(eventSource, 'auto-unarchive', data => {
             handleNewComments(data.url, {
                 attrs: ['data-archived'],
                 infoPrefix: 'archive',
@@ -1006,7 +1006,7 @@ ${commentedIssueRows}
             });
         });
 
-        onSSE(es, 'reset-unimportant', data => {
+        onSSE(eventSource, 'reset-unimportant', data => {
             handleNewComments(data.url, {
                 attrs: ['data-unimportant', 'data-marked-important'],
                 infoPrefix: 'unimportant',
@@ -1016,13 +1016,13 @@ ${commentedIssueRows}
             });
         });
 
-        es.onerror = () => {
-            if (es.readyState === EventSource.CLOSED) return;
-            es.close();
+        eventSource.onerror = () => {
+            if (eventSource.readyState === EventSource.CLOSED) return;
+            eventSource.close();
             console.error('AI stream connection lost');
         };
 
-        document.querySelectorAll('.status-text').forEach(el => el.classList.add('loading'));
+        document.querySelectorAll('.status-text').forEach(span => span.classList.add('loading'));
 
         // Lazy-load: only request AI processing for items visible in the viewport
         const enqueued = {};
