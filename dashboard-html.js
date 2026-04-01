@@ -42,6 +42,7 @@ export const INDEX_HTML = `<!DOCTYPE html>
     </h1>
     <div id="logs"></div>
     <script>
+    {
         const logs = document.getElementById('logs');
         const es = new EventSource('/api/status');
 
@@ -56,17 +57,17 @@ export const INDEX_HTML = `<!DOCTYPE html>
 
         const onSSE = (source, event, handler) => {
             source.addEventListener(event, e => {
-                const d = JSON.parse(e.data);
-                if (d.error) { console.error(d.error); return; }
-                handler(d);
+                const data = JSON.parse(e.data);
+                if (data.error) { console.error(data.error); return; }
+                handler(data);
             });
         };
 
-        onSSE(es, 'log', d => addLog(d.message, d.type));
-        onSSE(es, 'done', d => {
+        onSSE(es, 'log', data => addLog(data.message, data.type));
+        onSSE(es, 'done', data => {
             es.close();
             document.open();
-            document.write(d.html);
+            document.write(data.html);
             document.close();
             window.scrollTo(0, 0);
         });
@@ -79,6 +80,7 @@ export const INDEX_HTML = `<!DOCTYPE html>
         };
 
         addLog('Connecting...', 'info');
+    }
     </script>
 </body>
 </html>`;
@@ -149,7 +151,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
   }
 
   let updateHtml = '';
-  if (updateInfo) {
+  if (updateInfo && updateInfo.behind) {
     const commitItems = updateInfo.commits.map(c => {
       const lines = c.split('\n');
       const title = lines[0];
@@ -330,6 +332,8 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
         }
         .update-btn { background: none; border: 1px solid #d29922; color: #d29922; padding: 2px 8px; border-radius: 3px; font-family: inherit; font-size: 11px; cursor: pointer; margin-left: 12px; }
         .update-btn:hover { background: #d29922; color: #0d1117; }
+        .push-btn { background: none; border: 1px solid #f85149; color: #f85149; padding: 2px 8px; border-radius: 3px; font-family: inherit; font-size: 11px; cursor: pointer; margin-left: 12px; }
+        .push-btn:hover { background: #f85149; color: #0d1117; }
         .update-popup { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; z-index: 200; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; font-size: 12px; }
         .update-popup code { background: #21262d; padding: 2px 6px; border-radius: 3px; color: #c9d1d9; display: block; margin-top: 8px; }
         .update-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 199; }
@@ -374,7 +378,8 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     ${updateHtml}
     <h1>
         GitHub Status - ${date}
-        ${updateInfo ? `<button class="update-btn" onclick="document.getElementById('update-overlay').style.display='block';document.getElementById('update-popup').style.display='block'">UPDATE AVAILABLE</button>` : ''}
+        ${updateInfo && updateInfo.behind ? `<button class="update-btn" onclick="document.getElementById('update-overlay').style.display='block';document.getElementById('update-popup').style.display='block'">UPDATE AVAILABLE</button>` : ''}
+        ${updateInfo && updateInfo.ahead ? `<button class="push-btn">${updateInfo.ahead} unpushed commit${updateInfo.ahead > 1 ? 's' : ''} — push!</button>` : ''}
         <span class="header-links">
             <a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a>
             · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a>

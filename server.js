@@ -142,6 +142,10 @@ async function checkForUpdates() {
       const commits = log.split('\n---\n').map(l => l.trim()).filter(Boolean);
       return { behind, local: local.slice(0, 7), remote: remote.slice(0, 7), commits };
     }
+    const ahead = parseInt(await runCmd('git', ['rev-list', '--count', `${remote}..${local}`]));
+    if (ahead > 0) {
+      return { ahead, local: local.slice(0, 7), remote: remote.slice(0, 7) };
+    }
   }
   return null;
 }
