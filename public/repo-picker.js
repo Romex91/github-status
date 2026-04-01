@@ -16,12 +16,6 @@ function ensureStyles() {
 .dlg-clone-row:hover { background:#1c2128; }\
 .dlg-clone-path { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#c9d1d9; }\
 .dlg-clone-branch { color:#8b949e;font-size:11px;white-space:nowrap; }\
-.dlg-badge { font-size:10px;padding:1px 6px;border-radius:3px;white-space:nowrap; }\
-.dlg-badge-clean { background:#1a3a1a;color:#3fb950;border:1px solid #238636; }\
-.dlg-badge-dirty { background:#3d1f00;color:#d29922;border:1px solid #9e6a03; }\
-.dlg-badge-branch { background:#0c2d6b;color:#58a6ff;border:1px solid #1f6feb; }\
-.dlg-badge-behind { background:#3d1f00;color:#d29922;border:1px solid #9e6a03; }\
-.dlg-badge-diverged { background:#3d0a0a;color:#f85149;border:1px solid #da3633; }\
 .dlg-actions { display:flex;gap:6px;flex-shrink:0; }\
 .dlg-btn { background:none;border:1px solid #30363d;color:#c9d1d9;padding:3px 10px;border-radius:4px;font-family:inherit;font-size:11px;cursor:pointer;white-space:nowrap; }\
 .dlg-btn:hover { border-color:#58a6ff;color:#58a6ff; }\
@@ -157,7 +151,7 @@ function renderRepoSelectionDialog(dlg, data, index) {
               tmp.innerHTML = renderCloneRow({
                 path: clonePath,
                 currentBranch: row.querySelector('.dlg-clone-branch').textContent.replace(/[()]/g, ''),
-                onPRBranch: true, dirty: false, changedFiles: [], diverged: true, behindOrigin: false
+                onPRBranch: true, dirty: false, changedFiles: [], divergeStatus: 'diverged'
               }, branchName);
               row.replaceWith(tmp.firstElementChild);
             }
@@ -183,31 +177,33 @@ function renderCloneRow(clone, branch) {
   html += '<span class="dlg-clone-path" title="' + esc(clone.path) + '">' + esc(homePath) + '</span>';
   html += '<span class="dlg-clone-branch">(' + esc(clone.currentBranch) + ')</span>';
   if (clone.onPRBranch) {
-    html += '<span class="dlg-badge dlg-badge-branch">on branch</span>';
+    html += makeChip('on branch', 'blue');
   }
   if (clone.dirty) {
-    html += '<span class="dlg-badge dlg-badge-dirty">dirty: ' + clone.changedFiles.length + ' file' + (clone.changedFiles.length !== 1 ? 's' : '') + '</span>';
+    html += makeChip('dirty: ' + clone.changedFiles.length + ' file' + (clone.changedFiles.length !== 1 ? 's' : ''), 'yellow');
   } else {
-    html += '<span class="dlg-badge dlg-badge-clean">clean</span>';
+    html += makeChip('clean', 'green');
   }
-  if (clone.diverged) {
-    html += '<span class="dlg-badge dlg-badge-diverged">diverged</span>';
-  } else if (clone.behindOrigin) {
-    html += '<span class="dlg-badge dlg-badge-behind">behind</span>';
+  if (clone.divergeStatus === 'diverged') {
+    html += makeChip('diverged', 'red');
+  } else if (clone.divergeStatus === 'behind') {
+    html += makeChip('behind remote', 'yellow');
+  } else if (clone.divergeStatus === 'ahead') {
+    html += makeChip('ahead of remote', 'blue');
   }
 
   // Action buttons row
   html += '<div class="dlg-actions" style="width:100%;margin-top:4px">';
-  if (clone.diverged) {
+  if (clone.divergeStatus === 'diverged') {
     html += '<span style="color:#f85149;font-size:10px">Local and remote branches are diverged \u2014 resolve manually</span>';
-  } else if (clone.dirty && (clone.behindOrigin || !clone.onPRBranch)) {
+  } else if (clone.dirty && (clone.divergeStatus === 'behind' || !clone.onPRBranch)) {
     html += '<span style="color:#f85149;font-size:10px">dirty \u2014 commit or stash first</span>';
-  } else if (clone.behindOrigin || !clone.onPRBranch) {
+  } else if (clone.divergeStatus === 'behind' || !clone.onPRBranch) {
     const syncLabel = !clone.onPRBranch ? 'Checkout branch' : 'Pull latest';
     const syncAction = !clone.onPRBranch ? 'checkout' : 'pull';
     html += '<button class="dlg-btn dlg-btn-primary" data-sync="' + syncAction + '" data-clone="' + esc(clone.path) + '" data-branch="' + esc(branch || '') + '">' + syncLabel + '</button>';
   } else {
-    html += '<span class="dlg-badge dlg-badge-clean">ready</span>';
+    html += makeChip('ready', 'green');
   }
   html += '</div>';
 
@@ -226,17 +222,30 @@ function updateInlineActions(index, clonePath) {
       if (key !== String(index) && _clonePaths[key] === clonePath) {
         const staleEl = document.getElementById('inline-actions-' + key);
         if (staleEl) staleEl.innerHTML = '';
+        // Also clear title path and branch chips for stale items
+        const staleTitle = document.getElementById('title-' + key);
+        if (staleTitle) { const cb = staleTitle.querySelector('.clone-badge'); if (cb) { cb.previousSibling?.remove(); cb.remove(); } }
+        const staleBranch = document.getElementById('branch-' + key);
+        if (staleBranch) staleBranch.querySelectorAll('.chip').forEach(c => c.remove());
         delete _clonePaths[key];
       }
     }
     _clonePaths[index] = clonePath;
   }
+  // Append clone path to title cell
+  const titleCell = document.getElementById('title-' + index);
+  if (titleCell && !titleCell.querySelector('.clone-badge')) {
+    titleCell.innerHTML += '<br><span class="clone-badge">' + esc(toHomePath(clonePath)) + '</span>';
+  }
+  // Append clean chip to branch cell (just synced/cloned)
+  const branchCell = document.getElementById('branch-' + index);
+  if (branchCell && !branchCell.querySelector('.chip')) {
+    branchCell.innerHTML += makeChip('clean', 'green');
+  }
+  // Add chat/IDE buttons to inline actions
   const inlineEl = document.getElementById('inline-actions-' + index);
   if (!inlineEl) return;
-  const parts = clonePath.split('/');
-  const homePath = (parts[1] === 'home' || parts[1] === 'Users') ? '~/' + parts.slice(3).join('/') : clonePath;
-  let html = '<span class="clone-badge">' + esc(homePath) + '</span>';
-  html += '<span class="inline-action" onclick="inlineChat(' + index + ')">chat</span>';
+  let html = '<span class="inline-action" onclick="inlineChat(' + index + ')">chat</span>';
   const ides = (typeof INSTALLED_IDES !== 'undefined') ? INSTALLED_IDES : [];
   for (const ide of ides) {
     const cmd = ide.cmd.replaceAll('&','&amp;').replaceAll('"','&quot;');
