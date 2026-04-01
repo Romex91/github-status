@@ -117,14 +117,20 @@ export async function buildCloneIndex(log) {
     const status = await runCmd('git', ['status', '--porcelain'], { cwd: dir, reason: `dirty check: ${remoteRepo}` });
     const dirty = !!status;
     const changedFiles = status ? status.split('\n') : [];
-    return { remoteRepo, dir, currentBranch, dirty, changedFiles };
+    // Store raw refs for lazy divergence check later (no git commands here)
+    let localHead = null, trackingHead = null;
+    if (currentBranch) {
+      localHead = readRef(gitDir, `refs/heads/${currentBranch}`);
+      trackingHead = readRef(gitDir, `refs/remotes/origin/${currentBranch}`);
+    }
+    return { remoteRepo, dir, currentBranch, dirty, changedFiles, localHead, trackingHead };
   }));
 
   const index = new Map();
-  for (const { remoteRepo, dir, currentBranch, dirty, changedFiles } of results) {
+  for (const { remoteRepo, dir, currentBranch, dirty, changedFiles, localHead, trackingHead } of results) {
     const key = remoteRepo.toLowerCase();
     if (!index.has(key)) index.set(key, []);
-    index.get(key).push({ path: dir, currentBranch, dirty, changedFiles });
+    index.get(key).push({ path: dir, currentBranch, dirty, changedFiles, localHead, trackingHead });
   }
 
   const summary = `Clone index: ${gitDirs.length} repos scanned, ${index.size} unique remotes`;
@@ -135,7 +141,7 @@ export async function buildCloneIndex(log) {
 
 /**
  * Look up clones for a repo from the pre-built index.
- * Derives branch-specific fields (onPRBranch, behindOrigin, etc.) from stored refs.
+ * Derives branch-specific fields (onPRBranch, divergeStatus, etc.) from stored refs.
  */
 export async function scanForClones(repo, branch, headSha, index) {
   const home = homedir();
@@ -151,10 +157,11 @@ export async function scanForClones(repo, branch, headSha, index) {
 
     // Use headSha for divergence check, fall back to tracking ref if it doesn't exist locally.
     // If neither works but API says remote differs, assume behind (pull will do the real check).
-    const divergeStatus = await checkDivergence(clone.path, localHead, remoteHead)
+    let divergeStatus = await checkDivergence(clone.path, localHead, remoteHead)
       ?? await checkDivergence(clone.path, localHead, trackingHead);
-    const behindOrigin = divergeStatus === 'behind' || (divergeStatus === null && localHead && remoteHead && localHead !== remoteHead);
-    const diverged = divergeStatus === 'diverged';
+    if (!divergeStatus && localHead && remoteHead && localHead !== remoteHead) {
+      divergeStatus = 'behind';
+    }
 
     return {
       path: clone.path,
@@ -163,8 +170,7 @@ export async function scanForClones(repo, branch, headSha, index) {
       dirty: clone.dirty,
       changedFiles: clone.changedFiles,
       hasBranchLocally,
-      behindOrigin,
-      diverged,
+      divergeStatus,
       localHead,
       remoteHead,
     };

@@ -256,6 +256,35 @@ async function handleStatusStream(req, res) {
     const allItems = [...allPRs, ...allIssues, ...allCorrespondence];
     pendingPRData = allItems;
 
+    // Add all local checkouts to allItems for async PR discovery in Phase 2
+    const defaultBranches = new Set(['main', 'master', 'develop', 'development']);
+    if (cloneIdx) {
+      const checkoutEntries = [];
+      for (const [repoKey, clones] of cloneIdx) {
+        for (const clone of clones) {
+          checkoutEntries.push({
+            repo: repoKey,
+            title: '',
+            html_url: '',
+            number: 0,
+            updated_at: new Date().toISOString(),
+            section: 'checkout',
+            days: 0,
+            isIssue: false,
+            _checkoutPath: clone.path,
+            _checkoutDisplayPath: clone.path.startsWith(home) ? '~' + clone.path.slice(home.length) : clone.path,
+            _checkoutBranch: clone.currentBranch,
+            _checkoutDirty: clone.dirty,
+            _checkoutChangedFiles: clone.changedFiles.length,
+            _checkoutSkipAI: !clone.currentBranch || defaultBranches.has(clone.currentBranch),
+            _checkoutDivergeStatus: !clone.trackingHead ? 'no-remote' : clone.localHead === clone.trackingHead ? 'synced' : null,
+          });
+        }
+      }
+      checkoutEntries.sort((a, b) => a.repo.localeCompare(b.repo) || a._checkoutPath.localeCompare(b._checkoutPath));
+      allItems.push(...checkoutEntries);
+    }
+
     // Update persistent repo color assignments
     const allRepoNames = [...new Set(allItems.map(item => item.repo.split('/').pop()))];
     repoColorMap = updateRepoColors(allRepoNames);
@@ -272,7 +301,8 @@ async function handleStatusStream(req, res) {
     const autoUnarchivedUrls = readAutoUnarchived();
     const unimportantUrls = readUnimportant();
     const markedImportantUrls = readMarkedImportant();
-    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, assignedIssuesForHtml, createdIssuesForHtml, mentionedPRsForHtml, commentedPRsForHtml, mentionedIssuesForHtml, commentedIssuesForHtml, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls, autoUnarchivedUrls, unimportantUrls, markedImportantUrls });
+    const checkoutItems = allItems.filter(item => item.section === 'checkout');
+    const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, assignedIssuesForHtml, createdIssuesForHtml, mentionedPRsForHtml, commentedPRsForHtml, mentionedIssuesForHtml, commentedIssuesForHtml, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls, autoUnarchivedUrls, unimportantUrls, markedImportantUrls, checkoutItems });
 
     setCmdLogHook(null);
     const cmdLog = getCommandLog();
@@ -353,18 +383,49 @@ const server = http.createServer((req, res) => {
       const pr = pendingPRData && pendingPRData[index];
       if (!pr) { res.writeHead(404); res.end(JSON.stringify({ error: 'Item not found. Reload the page.' })); return; }
 
-      await launchChat({
-        prompt: pr.chatContext || '',
-        url: pr.html_url,
-        repo: pr.repo,
-        number: pr.number,
-        title: pr.title,
-        isIssue: pr.isIssue,
-        branch: pr.details?.headRefName || '',
-        aiStatus: pr.aiStatus || '',
-        action: action || 'chat-here',
-        clonePath: clonePath || '',
-      });
+      if (pr.section === 'checkout') {
+        const checkoutPath = clonePath || pr._checkoutPath;
+        const branch = (await runCmd('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: checkoutPath })).trim();
+        const defaultBranch = await runCmd('git', ['rev-parse', '--verify', 'refs/heads/main'], { cwd: checkoutPath }).then(() => 'main').catch(() =>
+          runCmd('git', ['rev-parse', '--verify', 'refs/heads/master'], { cwd: checkoutPath }).then(() => 'master').catch(() => null)
+        );
+        let diff = '';
+        if (defaultBranch && branch !== defaultBranch) {
+          const mergeBase = (await runCmd('git', ['merge-base', defaultBranch, 'HEAD'], { cwd: checkoutPath })).trim();
+          diff = await runCmd('git', ['diff', mergeBase, 'HEAD'], { cwd: checkoutPath });
+          if (diff.length > 20000) diff = diff.slice(0, 20000) + '\n... (truncated)';
+        } else {
+          diff = '(on default branch, no diff)';
+        }
+        const originUrl = (await runCmd('git', ['remote', 'get-url', 'origin'], { cwd: checkoutPath }).catch(() => '')).trim();
+        const repoMatch = originUrl.match(/[:\/]([^/]+\/[^/]+?)(?:\.git)?$/);
+        const repo = repoMatch ? repoMatch[1] : 'unknown';
+        await launchChat({
+          prompt: `## Diff against ${defaultBranch || 'default branch'} (merge-base)\n\n\`\`\`diff\n${diff}\n\`\`\``,
+          url: '',
+          repo,
+          number: 0,
+          title: `${branch} in ${repo.split('/').pop()}`,
+          isIssue: false,
+          branch,
+          aiStatus: '',
+          action: action || 'chat-here',
+          clonePath: checkoutPath,
+        });
+      } else {
+        await launchChat({
+          prompt: pr.chatContext || '',
+          url: pr.html_url,
+          repo: pr.repo,
+          number: pr.number,
+          title: pr.title,
+          isIssue: pr.isIssue,
+          branch: pr.details?.headRefName || '',
+          aiStatus: pr.aiStatus || '',
+          action: action || 'chat-here',
+          clonePath: clonePath || '',
+        });
+      }
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end('{"ok":true}');

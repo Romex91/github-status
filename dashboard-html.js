@@ -106,7 +106,7 @@ export const INDEX_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssues, mentionedPRs, commentedPRs, mentionedIssues, commentedIssues, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls, autoUnarchivedUrls, unimportantUrls, markedImportantUrls }) {
+export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssues, mentionedPRs, commentedPRs, mentionedIssues, commentedIssues, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls, autoUnarchivedUrls, unimportantUrls, markedImportantUrls, checkoutItems }) {
   const archivedSet = new Set(Object.keys(archivedUrls || {}));
   const autoUnarchivedSet = new Set(autoUnarchivedUrls || []);
   const unimportantSet = new Set(Object.keys(unimportantUrls || {}));
@@ -115,22 +115,36 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     return repoColorMap[repoName] || '#8b949e';
   }
 
-  function stateBadge(state) {
-    if (!state) return '';
-    const colors = { open: '#3fb950', merged: '#a371f7', closed: '#f85149' };
-    const color = colors[state] || '#8b949e';
-    return ` <span class="state-badge" style="color:${color};border-color:${color}">${state}</span>`;
+  const chipPalette = {
+    green:  { color: '#3fb950', bg: '#1a3a1a', border: '#238636' },
+    yellow: { color: '#d29922', bg: '#3d1f00', border: '#9e6a03' },
+    blue:   { color: '#58a6ff', bg: '#0c2d6b', border: '#1f6feb' },
+    red:    { color: '#f85149', bg: '#3d0a0a', border: '#da3633' },
+    purple: { color: '#a371f7', bg: '#271c4d', border: '#8957e5' },
+    muted:  { color: '#484f58', bg: '#161b22', border: '#30363d' },
+    grey:   { color: '#8b949e', bg: '#1c2128', border: '#30363d' },
+  };
+
+  function chip(label, tone, extraClass) {
+    const p = chipPalette[tone] || chipPalette.grey;
+    return ` <span class="chip${extraClass ? ' ' + extraClass : ''}" style="color:${p.color};background:${p.bg};border-color:${p.border}">${label}</span>`;
   }
 
-  function statusCell(item, globalIndex) {
+  function stateBadge(state) {
+    if (!state) return '';
+    const tones = { open: 'green', merged: 'purple', closed: 'red' };
+    return chip(state, tones[state] || 'grey');
+  }
+
+  function statusCell(item, globalIndex, prefillActions) {
     if (item.fetchError) {
       return `<td class="status-col status-bad">Fetch failed: ${escapeHtml(item.fetchError)}</td>`;
     }
     return `<td class="status-col" id="status-${globalIndex}">
                     <span class="status-text">queued...</span>
                     <br>
-                    <span id="inline-actions-${globalIndex}"></span>
-                    ${item.isIssue ? '' : `<span class="action-btn action-btn-accent" onclick="showRepoSelectionDialog(${globalIndex})">pick git clone</span>`}
+                    <span id="inline-actions-${globalIndex}">${prefillActions || ''}</span>
+                    ${item.isIssue || item.section === 'checkout' ? '' : `<span class="action-btn action-btn-accent" onclick="showRepoSelectionDialog(${globalIndex})">checkout</span>`}
                     <span class="copy-prompt" onclick="copyPrompt(${globalIndex})">
                         copy prompt for debugging
                         <div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div>
@@ -146,7 +160,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     const color = repoColor(repoShort);
     return `            <tr>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
-                <td class="title-col">
+                <td class="title-col" id="title-${globalIndex}">
                     <a href="${escapeHtml(pr.html_url)}">#${pr.number} ${escapeHtml(pr.title)}</a>
                     ${authorSpan}${stateSpan}
                 </td>
@@ -221,8 +235,8 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     const isUnimportant = !isArchived && unimportantSet.has(item.html_url);
     const urlAttr = escapeHtml(item.html_url).replace(/"/g, '&quot;');
     const isMarkedImportant = markedImportantSet.has(item.html_url);
-    const unarchivedBadge = autoUnarchivedSet.has(item.html_url) ? ' <span class="unarchived-badge">unarchived: new comments</span>' : '';
-    const importantBadge = isMarkedImportant ? ' <span class="important-badge">marked as important</span>' : '';
+    const unarchivedBadge = autoUnarchivedSet.has(item.html_url) ? chip('unarchived: new comments', 'yellow', 'unarchived-badge') : '';
+    const importantBadge = isMarkedImportant ? chip('marked as important', 'blue', 'important-badge') : '';
     const hidden = isArchived || isUnimportant;
     const attrs = isArchived ? ' data-archived="1"' : isUnimportant ? ' data-unimportant="1"' : '';
     const miAttr = isMarkedImportant ? ' data-marked-important="1"' : '';
@@ -235,6 +249,36 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
                 ${correspondenceStatusCell(item, globalIndex)}
                 <td class="ci-col"></td>
                 <td class="days-col days-${daysClass(item.days)}">${item.days}d</td>
+            </tr>`;
+  }
+
+  function checkoutActions(item, globalIndex) {
+    let html = `<span class="inline-action" onclick="inlineChat(${globalIndex})">chat</span>`;
+    for (const ide of installedIDEs) {
+      const cmdEsc = escapeHtml(ide.cmd).replace(/'/g, '&#39;');
+      html += `<span class="inline-action" onclick="inlineIDE('${cmdEsc}',${globalIndex})">${escapeHtml(ide.name)}</span>`;
+    }
+    return html;
+  }
+
+  function checkoutRow(item, globalIndex) {
+    const repoShort = item.repo.split('/').pop();
+    const color = repoColor(repoShort);
+    const branchEsc = escapeHtml(item._checkoutBranch || '(detached)');
+    const pathAttr = escapeHtml(item._checkoutPath).replace(/"/g, '&quot;');
+    const skipAI = item._checkoutSkipAI;
+    const actions = checkoutActions(item, globalIndex);
+    return `            <tr data-path="${pathAttr}">
+                <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
+                <td class="title-col" id="title-${globalIndex}">
+                    ${escapeHtml(item._checkoutDisplayPath)}
+                </td>
+                <td class="branch-col" id="branch-${globalIndex}"><span class="branch-name" onclick="copyBranch(this)" title="Click to copy">${branchEsc}</span></td>
+                ${skipAI
+                  ? `<td class="status-col" id="status-${globalIndex}" style="font-size:11px;color:#484f58">no PR<br><span id="inline-actions-${globalIndex}">${actions}</span></td>`
+                  : statusCell(item, globalIndex, actions)}
+                <td class="ci-col" id="ci-${globalIndex}"></td>
+                <td class="days-col" id="days-${globalIndex}"></td>
             </tr>`;
   }
 
@@ -252,6 +296,15 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
   const commentedPRRows = commentedPRs.map(pr => correspondenceRow(pr, true, idx++, true)).join('\n');
   const mentionedIssueRows = mentionedIssues.map(i => correspondenceRow(i, false, idx++, false)).join('\n');
   const commentedIssueRows = commentedIssues.map(i => correspondenceRow(i, false, idx++, false)).join('\n');
+  const checkoutStartIdx = idx;
+  const checkoutRows = (checkoutItems || []).map(item => checkoutRow(item, idx++)).join('\n');
+  const checkoutCloneData = JSON.stringify((checkoutItems || []).map((item, i) => ({
+    idx: checkoutStartIdx + i,
+    path: item._checkoutPath,
+    dirty: item._checkoutDirty,
+    changedCount: item._checkoutChangedFiles,
+    divergeStatus: item._checkoutDivergeStatus,
+  })));
 
   const hiddenSet = new Set([...archivedSet, ...unimportantSet]);
   const visibleMentionedPRs = mentionedPRs.filter(pr => !hiddenSet.has(pr.html_url)).length;
@@ -320,9 +373,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
         .header-links a { color: #484f58; text-decoration: none; }
         .header-links a:hover { color: #58a6ff; }
 
-        .state-badge { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 4px; margin-left: 4px; }
-        .unarchived-badge { font-size: 10px; color: #d29922; border: 1px solid #d29922; border-radius: 3px; padding: 1px 4px; margin-left: 6px; }
-        .important-badge { font-size: 10px; color: #58a6ff; border: 1px solid #58a6ff; border-radius: 3px; padding: 1px 4px; margin-left: 6px; }
+        .chip { font-size: 10px; border: 1px solid; border-radius: 3px; padding: 1px 5px; margin-left: 6px; display: inline-block; }
         .status-text { white-space: pre-wrap; }
         .status-text.loading { color: #d29922; }
         .copy-prompt { cursor: pointer; color: #8b949e; font-size: 10px; position: relative; padding: 2px 8px; margin-right: 6px; font-family: inherit; display: inline-block; }
@@ -360,6 +411,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
         .update-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 199; }
         .period-select { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 3px; padding: 2px 6px; font-family: inherit; font-size: 12px; margin-left: 8px; cursor: pointer; }
         .period-select:hover { border-color: #58a6ff; }
+        .sticky-header { position: sticky; top: 0; z-index: 100; background: #0d1117; padding-bottom: 0; }
         .nav-tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 1px solid #21262d; }
         .nav-tab { color: #8b949e; text-decoration: none; padding: 8px 16px; font-size: 13px; border-bottom: 2px solid transparent; cursor: pointer; }
         .nav-tab:hover { color: #c9d1d9; }
@@ -397,6 +449,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
         }
     </script>
     ${updateHtml}
+    <div class="sticky-header">
     <h1>
         GitHub Status - ${date}
         ${updateInfo && updateInfo.behind ? `<button class="update-btn" onclick="document.getElementById('update-overlay').style.display='block';document.getElementById('update-popup').style.display='block'">UPDATE AVAILABLE</button>` : ''}
@@ -413,6 +466,8 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
         <span class="nav-tab active" data-tab="prs" onclick="switchTab('prs')">Pull Requests</span>
         <span class="nav-tab" data-tab="issues" onclick="switchTab('issues')">Issues</span>
         <span class="nav-tab" data-tab="correspondence" onclick="switchTab('correspondence')">Correspondence (${totalCorrespondence})</span>
+        <span class="nav-tab" data-tab="checkouts" onclick="switchTab('checkouts')">Checkouts (${(checkoutItems || []).length})</span>
+    </div>
     </div>
     <div class="fold-controls"><a onclick="foldAll()">Fold all</a><a onclick="unfoldAll()">Unfold all</a></div>
 
@@ -580,6 +635,28 @@ ${commentedIssueRows}
 
     </div>
 
+    <div id="tab-checkouts" class="tab-panel">
+    <h1 class="section-heading">Local Checkouts</h1>
+
+    <h2 onclick="toggleFold(this)">Git Repositories (${(checkoutItems || []).length})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th class="repo-col">Repo</th>
+                <th class="title-col">Title</th>
+                <th class="branch-col">Branch</th>
+                <th class="status-col">AI-Status</th>
+                <th class="ci-col">CI</th>
+                <th class="days-col">Days</th>
+            </tr>
+        </thead>
+        <tbody>
+${checkoutRows}
+        </tbody>
+    </table>
+    <hr class="subdivider">
+    </div>
+
     <p class="footer">Generated ${date}</p>
 
     <script>
@@ -636,6 +713,19 @@ ${commentedIssueRows}
         });
 
         const _clonePaths = {};
+        const CHIP_PALETTE = {
+            green:{color:'#3fb950',bg:'#1a3a1a',border:'#238636'},
+            yellow:{color:'#d29922',bg:'#3d1f00',border:'#9e6a03'},
+            blue:{color:'#58a6ff',bg:'#0c2d6b',border:'#1f6feb'},
+            red:{color:'#f85149',bg:'#3d0a0a',border:'#da3633'},
+            purple:{color:'#a371f7',bg:'#271c4d',border:'#8957e5'},
+            muted:{color:'#484f58',bg:'#161b22',border:'#30363d'},
+            grey:{color:'#8b949e',bg:'#1c2128',border:'#30363d'},
+        };
+        function makeChip(label, tone, extraClass) {
+            const p = CHIP_PALETTE[tone] || CHIP_PALETTE.grey;
+            return '<span class="chip' + (extraClass ? ' ' + extraClass : '') + '" style="color:' + p.color + ';background:' + p.bg + ';border-color:' + p.border + '">' + label + '</span>';
+        }
         function inlineChat(index) {
             fetch('/api/chat', {
                 method: 'POST',
@@ -655,6 +745,29 @@ ${commentedIssueRows}
             }).then(resp => resp.json()).then(data => {
                 if (data.error) throw new Error(data.error);
             });
+        }
+
+        function toHomePath(path) {
+            const parts = path.split('/');
+            return (parts[1] === 'home' || parts[1] === 'Users') ? '~/' + parts.slice(3).join('/') : path;
+        }
+        function renderCloneChips(clone) {
+            let html = '';
+            const count = clone.changedFiles ? clone.changedFiles.length : (clone.changedCount || 0);
+            if (clone.dirty) {
+                html += makeChip(count + ' changed', 'yellow');
+            } else {
+                html += makeChip('clean', 'green');
+            }
+            const divergeLabels = {ahead:['ahead of remote','blue'],behind:['behind remote','yellow'],diverged:['diverged','red'],'no-remote':['no remote','muted']};
+            const dl = divergeLabels[clone.divergeStatus];
+            if (dl) html += makeChip(dl[0], dl[1]);
+            return html;
+        }
+        for (const c of ${checkoutCloneData}) {
+            _clonePaths[c.idx] = c.path;
+            const bc = document.getElementById('branch-' + c.idx);
+            if (bc) bc.innerHTML += renderCloneChips(c);
         }
 
         function copyPrompt(index) {
@@ -816,10 +929,7 @@ ${commentedIssueRows}
                     row.setAttribute('data-marked-important', '1');
                     const titleCol = row.querySelector('.title-col');
                     if (titleCol && !titleCol.querySelector('.important-badge')) {
-                        const badge = document.createElement('span');
-                        badge.className = 'important-badge';
-                        badge.textContent = 'marked as important';
-                        titleCol.appendChild(badge);
+                        titleCol.insertAdjacentHTML('beforeend', makeChip('marked as important', 'blue', 'important-badge'));
                     }
                 },
             });
@@ -875,15 +985,24 @@ ${commentedIssueRows}
                 body: JSON.stringify({ index: scanIdx })
             }).then(resp => resp.json()).then(scan => {
                 if (scan.error) throw new Error(scan.error);
-                const match = (scan.clones || []).find(clone => clone.onPRBranch && !clone.behindOrigin && !clone.diverged);
+                if (_clonePaths[scanIdx]) return; // checkout item — already has clone info
+                const match = (scan.clones || []).find(clone => clone.onPRBranch && clone.divergeStatus !== 'behind' && clone.divergeStatus !== 'diverged');
                 if (!match) return;
                 _clonePaths[scanIdx] = match.path;
+                // Append clone path to title cell
+                const titleCell = document.getElementById('title-' + scanIdx);
+                if (titleCell) {
+                    titleCell.innerHTML += '<br><span class="clone-badge">' + toHomePath(match.path) + '</span>';
+                }
+                // Append dirty/diverge chips to branch cell
+                const branchCell = document.getElementById('branch-' + scanIdx);
+                if (branchCell) {
+                    branchCell.innerHTML += renderCloneChips(match);
+                }
+                // Add chat/IDE buttons to inline actions
                 const inlineEl = document.getElementById('inline-actions-' + scanIdx);
                 if (!inlineEl) return;
-                const parts = match.path.split('/');
-                const homePath = (parts[1] === 'home' || parts[1] === 'Users') ? '~/' + parts.slice(3).join('/') : match.path;
-                let html = '<span class="clone-badge">' + homePath + '</span>';
-                html += '<span class="inline-action" onclick="inlineChat(' + scanIdx + ')">chat</span>';
+                let html = '<span class="inline-action" onclick="inlineChat(' + scanIdx + ')">chat</span>';
                 const ides = (typeof INSTALLED_IDES !== 'undefined') ? INSTALLED_IDES : [];
                 for (const ide of ides) {
                     const cmd = ide.cmd.replaceAll('&','&amp;').replaceAll('"','&quot;');
@@ -920,12 +1039,7 @@ ${commentedIssueRows}
             if (branchCell) {
                 branchCell.classList.remove('status-loading');
                 const branch = data.branch;
-                let html = '<span class="branch-name" onclick="copyBranch(this)" title="Click to copy">' + branch.replaceAll('&','&amp;').replaceAll('<','&lt;') + '</span>';
-                if (branch) {
-                    const cmd = 'cd ~/' + data.repoShort + ' && git fetch origin ' + branch + ' && git checkout ' + branch;
-                    html += '<br><span class="checkout-cmd" onclick="copyCmd(this)" data-cmd="' + cmd.replaceAll('"','&quot;') + '">copy git checkout cmd</span>';
-                }
-                branchCell.innerHTML = html;
+                branchCell.innerHTML = '<span class="branch-name" onclick="copyBranch(this)" title="Click to copy">' + branch.replaceAll('&','&amp;').replaceAll('<','&lt;') + '</span>';
             }
             const ciCell = document.getElementById('ci-' + data.index);
             if (ciCell) {
@@ -941,6 +1055,28 @@ ${commentedIssueRows}
                 }
             }
             pendingScanQueue.push(data.index); drainScanQueue();
+            // Checkout items: prepend PR link to title, update chips with refined diverge status
+            if (data.prTitle) {
+                const titleCell = document.getElementById('title-' + data.index);
+                if (titleCell) {
+                    const stateTones = {open:'green',merged:'purple',closed:'red'};
+                    const prLink = '<a href="' + data.prUrl + '">#' + data.prNumber + ' ' + data.prTitle.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a>'
+                        + (data.prState ? makeChip(data.prState, stateTones[data.prState] || 'grey') : '');
+                    titleCell.innerHTML = prLink + '<br>' + titleCell.innerHTML;
+                }
+                const daysCell = document.getElementById('days-' + data.index);
+                if (daysCell && data.prDays !== undefined) {
+                    daysCell.textContent = data.prDays + 'd';
+                    daysCell.className = 'days-col days-' + (data.prDays <= 3 ? 'good' : data.prDays <= 14 ? 'warning' : 'bad');
+                }
+            }
+            if (data.divergeStatus !== undefined) {
+                const branchCell = document.getElementById('branch-' + data.index);
+                if (branchCell) {
+                    branchCell.querySelectorAll('.chip').forEach(c => c.remove());
+                    branchCell.innerHTML += renderCloneChips(data);
+                }
+            }
         });
 
         onSSE(eventSource, 'ai-log', data => {
@@ -1022,10 +1158,7 @@ ${commentedIssueRows}
                 onRow: row => {
                     const titleCol = row.querySelector('.title-col');
                     if (titleCol && !titleCol.querySelector('.unarchived-badge')) {
-                        const badge = document.createElement('span');
-                        badge.className = 'unarchived-badge';
-                        badge.textContent = 'unarchived: new comments';
-                        titleCol.appendChild(badge);
+                        titleCol.insertAdjacentHTML('beforeend', makeChip('unarchived: new comments', 'yellow', 'unarchived-badge'));
                     }
                 },
             });
