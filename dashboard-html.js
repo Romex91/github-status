@@ -66,6 +66,19 @@ export const INDEX_HTML = `<!DOCTYPE html>
         };
 
         onSSE(eventSource, 'log', data => addLog(data.message, data.type));
+        onSSE(eventSource, 'syscall', data => {
+            const line = document.createElement('div');
+            line.className = 'log-line';
+            const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+            const statusColor = data.ok ? '#3fb950' : '#f85149';
+            line.innerHTML = '<span style="color:#484f58">[' + ts + ']</span> '
+                + '<span style="color:' + statusColor + '">[' + (data.ok ? 'OK' : 'FAIL') + ' ' + data.dur + ']</span>'
+                + (data.pwd ? ' <span style="color:#484f58">pwd=' + data.pwd + '</span>' : '')
+                + ' <span style="color:#c9d1d9">' + data.cmd.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>'
+                + (data.reason ? ' <span style="color:#6e7681">(' + data.reason.replace(/&/g,'&amp;').replace(/</g,'&lt;') + ')</span>' : '');
+            logsEl.appendChild(line);
+            window.scrollTo(0, document.body.scrollHeight);
+        });
         onSSE(eventSource, 'done', data => {
             eventSource.close();
             document.open();

@@ -61,11 +61,11 @@ function readRef(gitDir, ref) {
 export async function checkDivergence(cwd, localHead, remoteHead) {
   if (!localHead || !remoteHead || localHead === remoteHead) return null;
   // If the remote commit doesn't exist locally, we can't determine the relationship
-  const remoteExists = await runCmd('git', ['cat-file', '-t', remoteHead], { cwd }).then(() => true, () => false);
+  const remoteExists = await runCmd('git', ['cat-file', '-t', remoteHead], { cwd, reason: 'check branch divergence' }).then(() => true, () => false);
   if (!remoteExists) return null;
-  const remoteIsAncestor = await runCmd('git', ['merge-base', '--is-ancestor', remoteHead, localHead], { cwd }).then(() => true, () => false);
+  const remoteIsAncestor = await runCmd('git', ['merge-base', '--is-ancestor', remoteHead, localHead], { cwd, reason: 'check branch divergence' }).then(() => true, () => false);
   if (remoteIsAncestor) return 'ahead';
-  const localIsAncestor = await runCmd('git', ['merge-base', '--is-ancestor', localHead, remoteHead], { cwd }).then(() => true, () => false);
+  const localIsAncestor = await runCmd('git', ['merge-base', '--is-ancestor', localHead, remoteHead], { cwd, reason: 'check branch divergence' }).then(() => true, () => false);
   return localIsAncestor ? 'behind' : 'diverged';
 }
 
@@ -113,7 +113,7 @@ export async function buildCloneIndex(log) {
     if (log) log(`  scanning ${dir.replace(home, '~')} → ${remoteRepo}`, 'info');
 
     const currentBranch = readCurrentBranch(gitDir);
-    const status = await runCmd('git', ['status', '--porcelain'], { cwd: dir });
+    const status = await runCmd('git', ['status', '--porcelain'], { cwd: dir, reason: `dirty check: ${remoteRepo}` });
     const dirty = !!status;
     const changedFiles = status ? status.split('\n') : [];
 

@@ -11,7 +11,7 @@ export function resetCommandLog() { commandLog.length = 0; }
 let cmdLogHook = null;
 export function setCmdLogHook(fn) { cmdLogHook = fn; }
 
-export function runCmd(bin, args, { stdin, env: cmdEnv, signal, cwd } = {}) {
+export function runCmd(bin, args, { stdin, env: cmdEnv, signal, cwd, reason } = {}) {
   const cmd = `${bin} ${args.join(' ')}`;
   console.log(`runCmd > ${cmd}`);
   const startTime = Date.now();
@@ -36,7 +36,7 @@ export function runCmd(bin, args, { stdin, env: cmdEnv, signal, cwd } = {}) {
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
       const duration = Date.now() - startTime;
-      const entry = { cmd, duration, startTime, ok: code === 0 };
+      const entry = { cmd, duration, startTime, ok: code === 0, pwd: cwd || process.cwd(), reason: reason || null };
       if (code !== 0) entry.error = stderr || `Exit code ${code}`;
       commandLog.push(entry);
       if (cmdLogHook) cmdLogHook(entry);
@@ -46,7 +46,7 @@ export function runCmd(bin, args, { stdin, env: cmdEnv, signal, cwd } = {}) {
     });
     child.on('error', (err) => {
       clearTimeout(timer); signal?.removeEventListener('abort', onAbort);
-      const entry = { cmd, duration: Date.now() - startTime, startTime, ok: false, error: err.message };
+      const entry = { cmd, duration: Date.now() - startTime, startTime, ok: false, pwd: cwd || process.cwd(), reason: reason || null, error: err.message };
       commandLog.push(entry);
       if (cmdLogHook) cmdLogHook(entry);
       reject(new Error(`Command failed: ${cmd}\n${err.message}`));
@@ -56,7 +56,8 @@ export function runCmd(bin, args, { stdin, env: cmdEnv, signal, cwd } = {}) {
 
 export async function gh(...args) {
   const signal = args.length && args[args.length - 1] instanceof AbortSignal ? args.pop() : undefined;
-  return runCmd('gh', args, { signal });
+  const opts = args.length && typeof args[args.length - 1] === 'object' && args[args.length - 1] !== null && '__reason' in args[args.length - 1] ? args.pop() : {};
+  return runCmd('gh', args, { signal, reason: opts.__reason });
 }
 
 export function escapeHtml(str) {

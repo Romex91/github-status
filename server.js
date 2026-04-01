@@ -2,6 +2,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { runCmd, gh, daysSince, todayStr, resetCommandLog, getCommandLog, setCmdLogHook } from './helpers.js';
 import { loadRepoColors, updateRepoColors } from './repo-colors.js';
 import { fetchMyPRs, fetchReviewPRs, fetchMentionedPRs, fetchAssignedIssues, fetchMentionedIssues, fetchCreatedIssues, fetchCommentedPRs, fetchCommentedIssues } from './github-api.js';
@@ -132,17 +133,18 @@ function handlePost(req, res, handler) {
 // === Version Check ===
 
 async function checkForUpdates() {
-  await runCmd('git', ['fetch', 'origin', '--quiet']);
-  const local = await runCmd('git', ['rev-parse', 'HEAD']);
-  const remote = await runCmd('git', ['rev-parse', 'origin/main']);
+  const R = 'check for app updates';
+  await runCmd('git', ['fetch', 'origin', '--quiet'], { reason: R });
+  const local = await runCmd('git', ['rev-parse', 'HEAD'], { reason: R });
+  const remote = await runCmd('git', ['rev-parse', 'origin/main'], { reason: R });
   if (local !== remote) {
-    const behind = parseInt(await runCmd('git', ['rev-list', '--count', `${local}..${remote}`]));
+    const behind = parseInt(await runCmd('git', ['rev-list', '--count', `${local}..${remote}`], { reason: R }));
     if (behind > 0) {
-      const log = await runCmd('git', ['log', '--format=%h %s%n%b%n---', `${local}..${remote}`]);
+      const log = await runCmd('git', ['log', '--format=%h %s%n%b%n---', `${local}..${remote}`], { reason: R });
       const commits = log.split('\n---\n').map(line => line.trim()).filter(Boolean);
       return { behind, local: local.slice(0, 7), remote: remote.slice(0, 7), commits };
     }
-    const ahead = parseInt(await runCmd('git', ['rev-list', '--count', `${remote}..${local}`]));
+    const ahead = parseInt(await runCmd('git', ['rev-list', '--count', `${remote}..${local}`], { reason: R }));
     if (ahead > 0) {
       return { ahead, local: local.slice(0, 7), remote: remote.slice(0, 7) };
     }
@@ -169,11 +171,15 @@ async function handleStatusStream(req, res) {
     res.write(`event: log\ndata: ${JSON.stringify({ message, type })}\n\n`);
   }
 
+  const home = homedir();
   setCmdLogHook((entry) => {
     if (closed) return;
     const dur = entry.duration < 1000 ? `${entry.duration}ms` : `${(entry.duration / 1000).toFixed(1)}s`;
-    const status = entry.ok ? 'OK' : 'FAIL';
-    log(`[${status} ${dur}] ${entry.cmd}`, entry.ok ? 'info' : 'error');
+    res.write(`event: syscall\ndata: ${JSON.stringify({
+      ok: entry.ok, dur, cmd: entry.cmd,
+      pwd: entry.pwd ? entry.pwd.replace(home, '~') : null,
+      reason: entry.reason || null,
+    })}\n\n`);
   });
 
   // eslint-disable-next-line no-restricted-syntax -- top-level SSE handler: catches all errors and sends fatal SSE event to FE
@@ -187,7 +193,7 @@ async function handleStatusStream(req, res) {
       fetchMyPRs(log),
       fetchReviewPRs(log),
       fetchMentionedPRs(log, sinceQuery),
-      gh('api', 'user', '--jq', '.login').then(login => login.trim()),
+      gh('api', 'user', '--jq', '.login', { __reason: 'get GitHub username' }).then(login => login.trim()),
       fetchAssignedIssues(log),
       fetchMentionedIssues(log, sinceQuery),
       fetchCreatedIssues(log),

@@ -2,7 +2,7 @@ import { gh } from './helpers.js';
 
 export async function fetchMyPRs(log) {
   log('Fetching my open PRs...', 'info');
-  const raw = await gh('api', 'search/issues?q=author:@me+type:pr+state:open&per_page=100');
+  const raw = await gh('api', 'search/issues?q=author:@me+type:pr+state:open&per_page=100', { __reason: 'my open PRs' });
   const data = JSON.parse(raw);
   const prs = data.items.map(item => ({
     title: item.title,
@@ -17,7 +17,7 @@ export async function fetchMyPRs(log) {
 
 export async function fetchReviewPRs(log) {
   log('Fetching PRs awaiting my review...', 'info');
-  const raw = await gh('api', 'search/issues?q=review-requested:@me+type:pr+state:open&per_page=100');
+  const raw = await gh('api', 'search/issues?q=review-requested:@me+type:pr+state:open&per_page=100', { __reason: 'PRs awaiting my review' });
   const data = JSON.parse(raw);
   const prs = data.items.map(item => ({
     title: item.title,
@@ -33,7 +33,7 @@ export async function fetchReviewPRs(log) {
 
 export async function fetchMentionedPRs(log, since) {
   log(`Fetching PRs I was mentioned in (since ${since})...`, 'info');
-  const raw = await gh('api', `search/issues?q=mentions:@me+type:pr+updated:>${since}&per_page=100&sort=updated&order=desc`);
+  const raw = await gh('api', `search/issues?q=mentions:@me+type:pr+updated:>${since}&per_page=100&sort=updated&order=desc`, { __reason: 'mentioned PRs' });
   const data = JSON.parse(raw);
   const prs = data.items.map(item => ({
     title: item.title,
@@ -50,7 +50,7 @@ export async function fetchMentionedPRs(log, since) {
 
 export async function fetchAssignedIssues(log) {
   log('Fetching issues assigned to me...', 'info');
-  const raw = await gh('api', 'search/issues?q=assignee:@me+type:issue+state:open&per_page=100');
+  const raw = await gh('api', 'search/issues?q=assignee:@me+type:issue+state:open&per_page=100', { __reason: 'assigned issues' });
   const data = JSON.parse(raw);
   const issues = data.items.map(item => ({
     title: item.title,
@@ -65,7 +65,7 @@ export async function fetchAssignedIssues(log) {
 
 export async function fetchMentionedIssues(log, since) {
   log(`Fetching issues I was mentioned in (since ${since})...`, 'info');
-  const raw = await gh('api', `search/issues?q=mentions:@me+type:issue+state:open+updated:>${since}&per_page=100&sort=updated&order=desc`);
+  const raw = await gh('api', `search/issues?q=mentions:@me+type:issue+state:open+updated:>${since}&per_page=100&sort=updated&order=desc`, { __reason: 'mentioned issues' });
   const data = JSON.parse(raw);
   const issues = data.items.map(item => ({
     title: item.title,
@@ -80,7 +80,7 @@ export async function fetchMentionedIssues(log, since) {
 
 export async function fetchCreatedIssues(log) {
   log('Fetching issues I created...', 'info');
-  const raw = await gh('api', 'search/issues?q=author:@me+type:issue+state:open&per_page=100');
+  const raw = await gh('api', 'search/issues?q=author:@me+type:issue+state:open&per_page=100', { __reason: 'created issues' });
   const data = JSON.parse(raw);
   const issues = data.items.map(item => ({
     title: item.title,
@@ -95,7 +95,7 @@ export async function fetchCreatedIssues(log) {
 
 export async function fetchCommentedPRs(log, since) {
   log(`Fetching PRs I commented on (since ${since})...`, 'info');
-  const raw = await gh('api', `search/issues?q=commenter:@me+type:pr+updated:>${since}&per_page=100&sort=updated&order=desc`);
+  const raw = await gh('api', `search/issues?q=commenter:@me+type:pr+updated:>${since}&per_page=100&sort=updated&order=desc`, { __reason: 'commented PRs' });
   const data = JSON.parse(raw);
   const prs = data.items.map(item => ({
     title: item.title,
@@ -112,7 +112,7 @@ export async function fetchCommentedPRs(log, since) {
 
 export async function fetchCommentedIssues(log, since) {
   log(`Fetching issues I commented on (since ${since})...`, 'info');
-  const raw = await gh('api', `search/issues?q=commenter:@me+type:issue+updated:>${since}&per_page=100&sort=updated&order=desc`);
+  const raw = await gh('api', `search/issues?q=commenter:@me+type:issue+updated:>${since}&per_page=100&sort=updated&order=desc`, { __reason: 'commented issues' });
   const data = JSON.parse(raw);
   const issues = data.items.map(item => ({
     title: item.title,
@@ -126,8 +126,8 @@ export async function fetchCommentedIssues(log, since) {
 }
 
 export async function fetchRecentComments(repo, number, { isPR } = {}) {
-  const fetches = [gh('api', `repos/${repo}/issues/${number}/comments?per_page=100`)];
-  if (isPR) fetches.push(gh('api', `repos/${repo}/pulls/${number}/comments?per_page=100`));
+  const fetches = [gh('api', `repos/${repo}/issues/${number}/comments?per_page=100`, { __reason: `comments for ${repo}#${number}` })];
+  if (isPR) fetches.push(gh('api', `repos/${repo}/pulls/${number}/comments?per_page=100`, { __reason: `review comments for ${repo}#${number}` }));
   const results = await Promise.all(fetches);
   const all = results.flatMap(raw => JSON.parse(raw));
   return all.map(c => ({
@@ -141,7 +141,7 @@ export async function fetchRecentComments(repo, number, { isPR } = {}) {
 export async function fetchIssueDetails(repo, number, signal) {
   const [owner, name] = repo.split('/');
   const query = `{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){issue(number:${number}){body,labels(first:20){nodes{name}},assignees(first:20){nodes{login}},comments(first:100){nodes{databaseId,body,createdAt,url,author{login},reactions(first:20){nodes{content,user{login}}}}}}}}`;
-  const raw = await gh('api', 'graphql', '-f', `query=${query}`, signal);
+  const raw = await gh('api', 'graphql', '-f', `query=${query}`, { __reason: `issue details for ${repo}#${number}` }, signal);
   const issue = JSON.parse(raw).data.repository.issue;
   const commentReactions = new Map();
   const comments = (issue.comments?.nodes || []).map(c => {
@@ -167,7 +167,7 @@ export async function fetchIssueDetails(repo, number, signal) {
 
 export async function fetchPRSummary(repo, number, signal) {
   const raw = await gh('pr', 'view', String(number), '--repo', repo,
-    '--json', 'reviewDecision,statusCheckRollup,comments,reviews,reviewRequests,latestReviews,updatedAt,isDraft,mergeable,labels,body,headRefName,headRefOid', signal);
+    '--json', 'reviewDecision,statusCheckRollup,comments,reviews,reviewRequests,latestReviews,updatedAt,isDraft,mergeable,labels,body,headRefName,headRefOid', { __reason: `PR summary for ${repo}#${number}` }, signal);
   return JSON.parse(raw);
 }
 
@@ -175,8 +175,8 @@ export async function fetchPRPromptData(repo, number, signal) {
   const [owner, name] = repo.split('/');
   const threadsQuery = `{repository(owner:${JSON.stringify(owner)},name:${JSON.stringify(name)}){pullRequest(number:${number}){url,comments(first:100){nodes{databaseId,reactions(first:20){nodes{content,user{login}}}}},commits(first:100){nodes{commit{oid,message,committedDate,author{user{login}}}}},reviewThreads(first:100){nodes{isOutdated,comments(first:100){nodes{databaseId,path,createdAt,body,author{login},replyTo{databaseId},line,originalLine,diffHunk}}}}}}}`;
   const [diffRaw, threadsRaw] = await Promise.all([
-    gh('pr', 'diff', String(number), '--repo', repo, signal),
-    gh('api', 'graphql', '-f', `query=${threadsQuery}`, signal),
+    gh('pr', 'diff', String(number), '--repo', repo, { __reason: `PR diff for ${repo}#${number}` }, signal),
+    gh('api', 'graphql', '-f', `query=${threadsQuery}`, { __reason: `PR threads for ${repo}#${number}` }, signal),
   ]);
   const prData = JSON.parse(threadsRaw).data.repository.pullRequest;
   const prUrl = prData.url;
