@@ -5,9 +5,16 @@ export const CHAOS = false;
 
 export const CMD_TIMEOUT = 60000;
 
+const commandLog = [];
+export function getCommandLog() { return commandLog; }
+export function resetCommandLog() { commandLog.length = 0; }
+let cmdLogHook = null;
+export function setCmdLogHook(fn) { cmdLogHook = fn; }
+
 export function runCmd(bin, args, { stdin, env: cmdEnv, signal, cwd } = {}) {
   const cmd = `${bin} ${args.join(' ')}`;
   console.log(`runCmd > ${cmd}`);
+  const startTime = Date.now();
   let shellBin = bin, shellArgs = args;
   if (CHAOS) {
     const escaped = args.map(arg => `'${arg.replace(/'/g, "'\\''")}'`).join(' ');
@@ -28,11 +35,22 @@ export function runCmd(bin, args, { stdin, env: cmdEnv, signal, cwd } = {}) {
     child.on('close', (code) => {
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
+      const duration = Date.now() - startTime;
+      const entry = { cmd, duration, startTime, ok: code === 0 };
+      if (code !== 0) entry.error = stderr || `Exit code ${code}`;
+      commandLog.push(entry);
+      if (cmdLogHook) cmdLogHook(entry);
       if (signal?.aborted) reject(new Error(`Aborted: ${cmd}`));
       else if (code === 0) resolve(stdout.trim());
       else reject(new Error(code === null ? `Command timed out after ${CMD_TIMEOUT / 1000}s: ${cmd}` : `Command failed: ${cmd}\n${stderr || `Exit code ${code}`}`));
     });
-    child.on('error', (err) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); reject(new Error(`Command failed: ${cmd}\n${err.message}`)); });
+    child.on('error', (err) => {
+      clearTimeout(timer); signal?.removeEventListener('abort', onAbort);
+      const entry = { cmd, duration: Date.now() - startTime, startTime, ok: false, error: err.message };
+      commandLog.push(entry);
+      if (cmdLogHook) cmdLogHook(entry);
+      reject(new Error(`Command failed: ${cmd}\n${err.message}`));
+    });
   });
 }
 

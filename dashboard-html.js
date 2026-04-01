@@ -44,7 +44,9 @@ export const INDEX_HTML = `<!DOCTYPE html>
     <script>
     {
         const logsEl = document.getElementById('logs');
-        const eventSource = new EventSource('/api/status');
+        const logsOnly = new URLSearchParams(window.location.search).has('logs');
+        const sseUrl = logsOnly ? '/api/status?logs' : '/api/status';
+        const eventSource = new EventSource(sseUrl);
 
         const addLog = (msg, type) => {
             const line = document.createElement('div');
@@ -70,6 +72,10 @@ export const INDEX_HTML = `<!DOCTYPE html>
             document.write(data.html);
             document.close();
             window.scrollTo(0, 0);
+        });
+        onSSE(eventSource, 'logs-done', () => {
+            eventSource.close();
+            addLog('--- logs-only mode: page render skipped ---', 'success');
         });
         onSSE(eventSource, 'fatal', () => {});
 

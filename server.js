@@ -2,7 +2,7 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { runCmd, gh, daysSince, todayStr } from './helpers.js';
+import { runCmd, gh, daysSince, todayStr, resetCommandLog, getCommandLog, setCmdLogHook } from './helpers.js';
 import { loadRepoColors, updateRepoColors } from './repo-colors.js';
 import { fetchMyPRs, fetchReviewPRs, fetchMentionedPRs, fetchAssignedIssues, fetchMentionedIssues, fetchCreatedIssues, fetchCommentedPRs, fetchCommentedIssues } from './github-api.js';
 import { handleAIStream } from './ai-status.js';
@@ -153,6 +153,8 @@ async function checkForUpdates() {
 // === SSE: Phase 1 - Fetch PR data, send dashboard HTML ===
 
 async function handleStatusStream(req, res) {
+  const logsOnly = new URL(req.url, 'http://localhost').searchParams.has('logs');
+
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -160,15 +162,23 @@ async function handleStatusStream(req, res) {
   });
 
   let closed = false;
-  req.on('close', () => { closed = true; });
+  req.on('close', () => { closed = true; setCmdLogHook(null); });
 
   function log(message, type = 'info') {
     if (closed) return;
     res.write(`event: log\ndata: ${JSON.stringify({ message, type })}\n\n`);
   }
 
+  setCmdLogHook((entry) => {
+    if (closed) return;
+    const dur = entry.duration < 1000 ? `${entry.duration}ms` : `${(entry.duration / 1000).toFixed(1)}s`;
+    const status = entry.ok ? 'OK' : 'FAIL';
+    log(`[${status} ${dur}] ${entry.cmd}`, entry.ok ? 'info' : 'error');
+  });
+
   // eslint-disable-next-line no-restricted-syntax -- top-level SSE handler: catches all errors and sends fatal SSE event to FE
   try {
+    resetCommandLog();
     const period = readPeriod();
     const since = periodToSince(period);
     const sinceQuery = since || '2000-01-01';
@@ -254,11 +264,21 @@ async function handleStatusStream(req, res) {
     const markedImportantUrls = readMarkedImportant();
     const html = buildDashboardHtml(myPRsForHtml, reviewPRsForHtml, assignedIssuesForHtml, createdIssuesForHtml, mentionedPRsForHtml, commentedPRsForHtml, mentionedIssuesForHtml, commentedIssuesForHtml, date, updateInfo, { repoColorMap, installedIDEs, period, ghUsername, archivedUrls, autoUnarchivedUrls, unimportantUrls, markedImportantUrls });
 
+    setCmdLogHook(null);
+    const cmdLog = getCommandLog();
+    const totalDuration = cmdLog.reduce((sum, e) => sum + e.duration, 0);
+    log(`Done: ${cmdLog.length} system calls, total ${(totalDuration / 1000).toFixed(1)}s`, 'success');
+
     if (!closed) {
-      res.write(`event: done\ndata: ${JSON.stringify({ html })}\n\n`);
+      if (logsOnly) {
+        res.write(`event: logs-done\ndata: {}\n\n`);
+      } else {
+        res.write(`event: done\ndata: ${JSON.stringify({ html })}\n\n`);
+      }
       res.end();
     }
   } catch (err) {
+    setCmdLogHook(null);
     console.error('Fatal status stream error:', err);
     const errDetail = `${err.stack || err.message}\n\n[gh ${ghVersion}]`;
     log(`Error: ${errDetail}`, 'error');
