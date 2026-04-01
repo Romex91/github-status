@@ -459,7 +459,7 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
     }
   }
 
-  onEnqueueReady(function(indices) {
+  onEnqueueReady(indices => {
     for (const idx of indices) {
       if (queued.has(idx) || idx < 0 || idx >= allPRs.length) continue;
       queued.add(idx);

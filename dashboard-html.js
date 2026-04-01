@@ -25,41 +25,54 @@ export const INDEX_HTML = `<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <script>(function(){var o=console.error;function banner(){var el=document.getElementById('_err');if(el)el.style.display=''}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
-    <h1>GitHub Status<span id="_err" style="display:none;font-size:14px;margin-left:12px;color:#f85149">There are errors in dev console!!!</span></h1>
+    <script>
+        {
+            const origError = console.error;
+            const showBanner = () => { const el = document.getElementById('_err'); if (el) el.style.display = ''; };
+            console.error = (...args) => { origError.apply(console, args); showBanner(); setTimeout(showBanner, 0); };
+            window.onerror = (m, s, l, c, e) => { origError.call(console, e || m); showBanner(); setTimeout(showBanner, 0); };
+            window.addEventListener('unhandledrejection', e => console.error(e.reason));
+        }
+    </script>
+    <h1>
+        GitHub Status
+        <span id="_err" style="display:none;font-size:14px;margin-left:12px;color:#f85149">
+            There are errors in dev console!!!
+        </span>
+    </h1>
     <div id="logs"></div>
     <script>
-        var logs = document.getElementById('logs');
-        var es = new EventSource('/api/status');
+        const logs = document.getElementById('logs');
+        const es = new EventSource('/api/status');
 
-        function addLog(msg, type) {
-            var line = document.createElement('div');
+        const addLog = (msg, type) => {
+            const line = document.createElement('div');
             line.className = 'log-line log-' + type;
-            var t = new Date().toLocaleTimeString('en-US', { hour12: false });
+            const t = new Date().toLocaleTimeString('en-US', { hour12: false });
             line.textContent = '[' + t + '] ' + msg;
             logs.appendChild(line);
             window.scrollTo(0, document.body.scrollHeight);
-        }
+        };
 
-        function onSSE(source, event, handler) {
-            source.addEventListener(event, function(e) {
-                var d = JSON.parse(e.data);
+        const onSSE = (source, event, handler) => {
+            source.addEventListener(event, e => {
+                const d = JSON.parse(e.data);
                 if (d.error) { console.error(d.error); return; }
                 handler(d);
             });
-        }
+        };
 
-        onSSE(es, 'log', function(d) { addLog(d.message, d.type); });
-        onSSE(es, 'done', function(d) {
+        onSSE(es, 'log', d => addLog(d.message, d.type));
+        onSSE(es, 'done', d => {
             es.close();
             document.open();
             document.write(d.html);
             document.close();
             window.scrollTo(0, 0);
         });
-        onSSE(es, 'fatal', function() {});
+        onSSE(es, 'fatal', () => {});
 
-        es.onerror = function() {
+        es.onerror = () => {
             if (es.readyState === EventSource.CLOSED) return;
             es.close();
             console.error('Status stream connection lost');
@@ -92,7 +105,13 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     }
     return `<td class="status-col" id="status-${globalIndex}">
                     <span class="status-text">queued...</span>
-                    <br><span id="inline-actions-${globalIndex}"></span>${item.isIssue ? '' : `<span class="action-btn action-btn-accent" onclick="showRepoSelectionDialog(${globalIndex})">pick git clone</span>`}<span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
+                    <br>
+                    <span id="inline-actions-${globalIndex}"></span>
+                    ${item.isIssue ? '' : `<span class="action-btn action-btn-accent" onclick="showRepoSelectionDialog(${globalIndex})">pick git clone</span>`}
+                    <span class="copy-prompt" onclick="copyPrompt(${globalIndex})">
+                        copy prompt for debugging
+                        <div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div>
+                    </span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
   }
@@ -104,7 +123,10 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     const color = repoColor(repoShort);
     return `            <tr>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
-                <td class="title-col"><a href="${escapeHtml(pr.html_url)}">#${pr.number} ${escapeHtml(pr.title)}</a>${authorSpan}${stateSpan}</td>
+                <td class="title-col">
+                    <a href="${escapeHtml(pr.html_url)}">#${pr.number} ${escapeHtml(pr.title)}</a>
+                    ${authorSpan}${stateSpan}
+                </td>
                 <td class="branch-col status-loading" id="branch-${globalIndex}">queued...</td>
                 ${statusCell(pr, globalIndex)}
                 <td class="ci-col status-loading" id="ci-${globalIndex}">queued...</td>
@@ -117,7 +139,9 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     const color = repoColor(repoShort);
     return `            <tr>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
-                <td class="title-col" colspan="2"><a href="${escapeHtml(issue.html_url)}">#${issue.number} ${escapeHtml(issue.title)}</a></td>
+                <td class="title-col" colspan="2">
+                    <a href="${escapeHtml(issue.html_url)}">#${issue.number} ${escapeHtml(issue.title)}</a>
+                </td>
                 ${statusCell(issue, globalIndex)}
                 <td class="ci-col"></td>
                 <td class="days-col days-${daysClass(issue.days)}">${issue.days}d</td>
@@ -130,9 +154,13 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
       const lines = c.split('\n');
       const title = lines[0];
       const body = lines.slice(1).join('\n').trim();
-      return `<li><strong>${escapeHtml(title)}</strong>${body ? `<br><span style="color:#484f58;white-space:pre-wrap">${escapeHtml(body)}</span>` : ''}</li>`;
+      return `<li>
+            <strong>${escapeHtml(title)}</strong>
+            ${body ? `<br><span style="color:#484f58;white-space:pre-wrap">${escapeHtml(body)}</span>` : ''}
+        </li>`;
     }).join('');
-    updateHtml = `<div class="update-overlay" id="update-overlay" onclick="document.getElementById('update-overlay').style.display='none';document.getElementById('update-popup').style.display='none'"></div>
+    updateHtml = `<div class="update-overlay" id="update-overlay"
+         onclick="document.getElementById('update-overlay').style.display='none';document.getElementById('update-popup').style.display='none'"></div>
     <div class="update-popup" id="update-popup">
         <span style="color:#d29922;font-size:14px;font-weight:600">Update available</span>
         <p style="color:#8b949e;margin:8px 0">${updateInfo.behind} new commit${updateInfo.behind > 1 ? 's' : ''}:</p>
@@ -150,7 +178,13 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     return `<td class="status-col" id="status-${globalIndex}">
                     <span class="status-text">queued...</span>
                     <div class="correspondence-citations" id="corr-${globalIndex}"></div>
-                    <br><span id="inline-actions-${globalIndex}"></span><span class="action-btn action-btn-archive action-btn-disabled" id="archive-btn-${globalIndex}">ARCHIVE</span><span class="copy-prompt" onclick="copyPrompt(${globalIndex})">copy prompt for debugging<div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div></span>
+                    <br>
+                    <span id="inline-actions-${globalIndex}"></span>
+                    <span class="action-btn action-btn-archive action-btn-disabled" id="archive-btn-${globalIndex}">ARCHIVE</span>
+                    <span class="copy-prompt" onclick="copyPrompt(${globalIndex})">
+                        copy prompt for debugging
+                        <div class="prompt-tooltip" id="prompt-tooltip-${globalIndex}"></div>
+                    </span>
                     <div class="ai-log" id="ai-log-${globalIndex}" style="display:none"></div>
                 </td>`;
   }
@@ -171,7 +205,10 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     const miAttr = isMarkedImportant ? ' data-marked-important="1"' : '';
     return `            <tr data-url="${urlAttr}"${attrs}${miAttr}${hidden ? ' style="display:none"' : ''}>
                 <td class="repo-col" style="color:${color}">${escapeHtml(repoShort)}</td>
-                <td class="title-col" colspan="2"><a href="${escapeHtml(item.html_url)}">#${item.number} ${escapeHtml(item.title)}</a>${authorSpan}${stateSpan}${unarchivedBadge}${importantBadge}</td>
+                <td class="title-col" colspan="2">
+                    <a href="${escapeHtml(item.html_url)}">#${item.number} ${escapeHtml(item.title)}</a>
+                    ${authorSpan}${stateSpan}${unarchivedBadge}${importantBadge}
+                </td>
                 ${correspondenceStatusCell(item, globalIndex)}
                 <td class="ci-col"></td>
                 <td class="days-col days-${daysClass(item.days)}">${item.days}d</td>
@@ -325,9 +362,27 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     </style>
 </head>
 <body>
-    <script>(function(){var o=console.error;function banner(){var el=document.getElementById('_err');if(el)el.style.display=''}console.error=function(){o.apply(console,arguments);banner();setTimeout(banner,0)};window.onerror=function(m,s,l,c,e){o.call(console,e||m);banner();setTimeout(banner,0)};window.addEventListener('unhandledrejection',function(e){console.error(e.reason)})})()</script>
+    <script>
+        {
+            const origError = console.error;
+            const showBanner = () => { const el = document.getElementById('_err'); if (el) el.style.display = ''; };
+            console.error = (...args) => { origError.apply(console, args); showBanner(); setTimeout(showBanner, 0); };
+            window.onerror = (m, s, l, c, e) => { origError.call(console, e || m); showBanner(); setTimeout(showBanner, 0); };
+            window.addEventListener('unhandledrejection', e => console.error(e.reason));
+        }
+    </script>
     ${updateHtml}
-    <h1>GitHub Status - ${date}${updateInfo ? ' <button class="update-btn" onclick="document.getElementById(\'update-overlay\').style.display=\'block\';document.getElementById(\'update-popup\').style.display=\'block\'">UPDATE AVAILABLE</button>' : ''} <span class="header-links"><a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a> · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a><span id="_err" style="display:none"> · <span style="color:#f85149;cursor:pointer" onclick="alert('Check the browser dev console for error details')" title="Check dev console for details">There are errors in dev console!!!</span></span></span></h1>
+    <h1>
+        GitHub Status - ${date}
+        ${updateInfo ? `<button class="update-btn" onclick="document.getElementById('update-overlay').style.display='block';document.getElementById('update-popup').style.display='block'">UPDATE AVAILABLE</button>` : ''}
+        <span class="header-links">
+            <a href="https://github.com/Romex91/github-status/issues/new?template=bug_report.md" target="_blank">file an issue</a>
+            · <a href="https://github.com/Romex91/github-status/issues/new?template=feature_request.md" target="_blank">request a feature</a>
+            <span id="_err" style="display:none">
+                · <span style="color:#f85149;cursor:pointer" onclick="alert('Check the browser dev console for error details')" title="Check dev console for details">There are errors in dev console!!!</span>
+            </span>
+        </span>
+    </h1>
     <div class="nav-tabs">
         <span class="nav-tab active" data-tab="prs" onclick="switchTab('prs')">Pull Requests</span>
         <span class="nav-tab" data-tab="issues" onclick="switchTab('issues')">Issues</span>
@@ -416,7 +471,12 @@ ${createdIssueRows}
     </div>
 
     <div id="tab-correspondence" class="tab-panel">
-    <h1 class="section-heading">Correspondence <select class="period-select" onchange="fetch('/api/period',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period:this.value})}).then(function(){location.reload()})">${periodOptions}</select></h1>
+    <h1 class="section-heading">Correspondence
+        <select class="period-select"
+            onchange="fetch('/api/period',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({period:this.value})}).then(() => location.reload())">
+            ${periodOptions}
+        </select>
+    </h1>
     <div id="archive-info" style="display:${archivedSet.size > 0 ? '' : 'none'}">
         <span id="archive-count">${archivedSet.size}</span> archived — <a onclick="showArchived()">manage</a>
     </div>
@@ -497,69 +557,67 @@ ${commentedIssueRows}
     <p class="footer">Generated ${date}</p>
 
     <script>
-        var _activeTab = localStorage.getItem('activeTab') || 'prs';
+        let _activeTab = localStorage.getItem('activeTab') || 'prs';
 
         function switchTab(tab) {
-            // Save scroll position for current tab
             sessionStorage.setItem('scrollY-' + _activeTab, window.scrollY);
             _activeTab = tab;
             localStorage.setItem('activeTab', tab);
-            document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
-            document.querySelectorAll('.nav-tab').forEach(function(t) { t.classList.remove('active'); });
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
             document.getElementById('tab-' + tab).classList.add('active');
             document.querySelector('.nav-tab[data-tab="'+tab+'"]').classList.add('active');
-            // Restore scroll position for new tab
             window.scrollTo(0, parseInt(sessionStorage.getItem('scrollY-' + tab)) || 0);
         }
 
-        function saveFoldState() {
-            document.querySelectorAll('.tab-panel').forEach(function(panel) {
-                var tab = panel.id.replace('tab-', '');
-                var state = [];
-                panel.querySelectorAll('h2').forEach(function(h) { state.push(h.classList.contains('folded')); });
+        const saveFoldState = () => {
+            document.querySelectorAll('.tab-panel').forEach(panel => {
+                const tab = panel.id.replace('tab-', '');
+                const state = [];
+                panel.querySelectorAll('h2').forEach(h => state.push(h.classList.contains('folded')));
                 localStorage.setItem('foldState-' + tab, JSON.stringify(state));
             });
-        }
-        function restoreFoldState() {
-            document.querySelectorAll('.tab-panel').forEach(function(panel) {
-                var tab = panel.id.replace('tab-', '');
-                var raw = localStorage.getItem('foldState-' + tab);
+        };
+        const restoreFoldState = () => {
+            document.querySelectorAll('.tab-panel').forEach(panel => {
+                const tab = panel.id.replace('tab-', '');
+                const raw = localStorage.getItem('foldState-' + tab);
                 if (!raw) return;
-                var state = JSON.parse(raw);
-                panel.querySelectorAll('h2').forEach(function(h, i) {
+                const state = JSON.parse(raw);
+                panel.querySelectorAll('h2').forEach((h, i) => {
                     if (state[i]) h.classList.add('folded');
                 });
             });
-        }
+        };
         function toggleFold(el) {
             el.classList.toggle('folded');
             saveFoldState();
         }
         function foldAll() {
-            var panel = document.getElementById('tab-' + _activeTab);
-            panel.querySelectorAll('h2').forEach(function(h) { h.classList.add('folded'); });
+            const panel = document.getElementById('tab-' + _activeTab);
+            panel.querySelectorAll('h2').forEach(h => h.classList.add('folded'));
             saveFoldState();
         }
         function unfoldAll() {
-            var panel = document.getElementById('tab-' + _activeTab);
-            panel.querySelectorAll('h2').forEach(function(h) { h.classList.remove('folded'); });
+            const panel = document.getElementById('tab-' + _activeTab);
+            panel.querySelectorAll('h2').forEach(h => h.classList.remove('folded'));
             saveFoldState();
         }
         restoreFoldState();
         switchTab(_activeTab);
-        window.addEventListener('beforeunload', function() {
+        window.addEventListener('beforeunload', () => {
             sessionStorage.setItem('scrollY-' + _activeTab, window.scrollY);
         });
 
-        var _clonePaths = {};
+        const _clonePaths = {};
         function inlineChat(index) {
             fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ index: index, action: 'chat-here', clonePath: _clonePaths[index] || '' })
-            }).then(function(r) { return r.json(); }).then(function(d) {
+                body: JSON.stringify({ index, action: 'chat-here', clonePath: _clonePaths[index] || '' })
+            }).then(r => r.json()).then(d => {
                 if (d.error) throw new Error(d.error);
-                var el = document.getElementById('inline-actions-' + index);
+                const el = document.getElementById('inline-actions-' + index);
                 if (el) showCopyToast(el, 'opened terminal window');
             });
         }
@@ -567,102 +625,104 @@ ${commentedIssueRows}
             fetch('/api/open-ide', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ cmd: cmd, clonePath: _clonePaths[index] || '' })
-            }).then(function(r) { return r.json(); }).then(function(d) {
+                body: JSON.stringify({ cmd, clonePath: _clonePaths[index] || '' })
+            }).then(r => r.json()).then(d => {
                 if (d.error) throw new Error(d.error);
             });
         }
 
         function copyPrompt(index) {
-            var log = document.getElementById('ai-log-' + index);
-            var text = log.textContent || '';
+            const log = document.getElementById('ai-log-' + index);
+            const text = log.textContent || '';
             if (!text) return;
-            var btn = log.parentNode.querySelector('.copy-prompt');
-            navigator.clipboard.writeText(text).then(function() { showCopyToast(btn); });
+            const btn = log.parentNode.querySelector('.copy-prompt');
+            navigator.clipboard.writeText(text).then(() => showCopyToast(btn));
         }
 
         function copyCmd(el) {
-            var cmd = el.getAttribute('data-cmd');
+            const cmd = el.getAttribute('data-cmd');
             if (!cmd) return;
-            navigator.clipboard.writeText(cmd).then(function() {
+            navigator.clipboard.writeText(cmd).then(() => {
                 showCopyToast(el);
                 el.classList.add('copied');
-                setTimeout(function() {
-                    el.classList.remove('copied');
-                }, 1000);
+                setTimeout(() => el.classList.remove('copied'), 1000);
             });
         }
 
         function showCopyToast(el, msg) {
-            var wrapper = el.closest('td') || el.parentNode;
+            const wrapper = el.closest('td') || el.parentNode;
             wrapper.style.position = 'relative';
-            var toast = document.createElement('span');
+            const toast = document.createElement('span');
             toast.className = 'copy-toast';
             toast.textContent = msg || 'copied!';
             wrapper.appendChild(toast);
-            setTimeout(function() { toast.remove(); }, 1500);
+            setTimeout(() => toast.remove(), 1500);
         }
 
         function copyBranch(el) {
-            var text = el.textContent;
+            const text = el.textContent;
             if (!text) return;
-            navigator.clipboard.writeText(text).then(function() { showCopyToast(el); });
+            navigator.clipboard.writeText(text).then(() => showCopyToast(el));
         }
 
         function updateHeadingCount(row, delta) {
-            var section = row.closest('table').previousElementSibling;
-            while (section && section.tagName !== 'H2') section = section.previousElementSibling;
-            if (!section) return;
-            var m = section.textContent.match(/\\((\\d+)\\)/);
-            if (m) {
-                var newCount = Math.max(0, parseInt(m[1]) + delta);
-                section.childNodes.forEach(function(n) {
-                    if (n.nodeType === 3) n.textContent = n.textContent.replace(/\\(\\d+\\)/, '(' + newCount + ')');
+            let heading = row.closest('table').previousElementSibling;
+            while (heading && heading.tagName !== 'H2') heading = heading.previousElementSibling;
+            if (!heading) return;
+            const match = heading.textContent.match(/\\((\\d+)\\)/);
+            if (match) {
+                const newCount = Math.max(0, parseInt(match[1]) + delta);
+                heading.childNodes.forEach(node => {
+                    if (node.nodeType === 3) node.textContent = node.textContent.replace(/\\(\\d+\\)/, '(' + newCount + ')');
                 });
             }
         }
 
         function updateCorrespondenceTab() {
-            var tab = document.querySelector('span.nav-tab[data-tab="correspondence"]');
+            const tab = document.querySelector('span.nav-tab[data-tab="correspondence"]');
             if (!tab) return;
-            var count = Array.from(document.querySelectorAll('#tab-correspondence tr[data-idx]')).filter(function(r) { return r.style.display !== 'none'; }).length;
+            const count = Array.from(document.querySelectorAll('#tab-correspondence tr[data-idx]')).filter(row => row.style.display !== 'none').length;
             tab.textContent = tab.textContent.replace(/\\((\\d+)\\)/, '(' + count + ')');
         }
 
         function updateInfoCount(prefix, delta) {
-            var countEl = document.getElementById(prefix + '-count');
-            var infoEl = document.getElementById(prefix + '-info');
-            var n = Math.max(0, parseInt(countEl.textContent) + delta);
-            countEl.textContent = n;
-            infoEl.style.display = n > 0 ? '' : 'none';
-            return n;
+            const countEl = document.getElementById(prefix + '-count');
+            const infoEl = document.getElementById(prefix + '-info');
+            const newVal = Math.max(0, parseInt(countEl.textContent) + delta);
+            countEl.textContent = newVal;
+            infoEl.style.display = newVal > 0 ? '' : 'none';
+            return newVal;
         }
 
         function showManagedPopup(opts) {
-            fetch(opts.apiUrl).then(function(r) { return r.json(); }).then(function(d) {
-                if (d.error) throw new Error(d.error);
-                var existing = document.getElementById('archive-overlay');
-                if (existing) existing.remove();
-                var existingPopup = document.getElementById('archive-popup');
-                if (existingPopup) existingPopup.remove();
+            fetch(opts.apiUrl).then(resp => resp.json()).then(data => {
+                if (data.error) throw new Error(data.error);
+                document.getElementById('archive-overlay')?.remove();
+                document.getElementById('archive-popup')?.remove();
 
-                var overlay = document.createElement('div');
+                const overlay = document.createElement('div');
                 overlay.id = 'archive-overlay';
-                var popup = document.createElement('div');
+                const popup = document.createElement('div');
                 popup.id = 'archive-popup';
-                overlay.onclick = function() { overlay.remove(); popup.remove(); };
+                overlay.onclick = () => { overlay.remove(); popup.remove(); };
 
-                var items = d[opts.dataKey];
-                var urls = Object.keys(items);
-                var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="color:#c9d1d9;font-size:14px;font-weight:600">' + opts.title + ' (' + urls.length + ')</span><span style="cursor:pointer;color:#8b949e;font-size:18px" onclick="document.getElementById(\\'archive-overlay\\').remove();document.getElementById(\\'archive-popup\\').remove()">\u00d7</span></div>';
+                const items = data[opts.dataKey];
+                const urls = Object.keys(items);
+                let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+                    + '<span style="color:#c9d1d9;font-size:14px;font-weight:600">' + opts.title + ' (' + urls.length + ')</span>'
+                    + '<span style="cursor:pointer;color:#8b949e;font-size:18px" onclick="document.getElementById(\\'archive-overlay\\').remove();document.getElementById(\\'archive-popup\\').remove()">\u00d7</span>'
+                    + '</div>';
                 if (urls.length === 0) {
                     html += '<div style="color:#8b949e">No items.</div>';
                 } else {
-                    urls.forEach(function(url) {
-                        var entry = items[url];
-                        var title = (entry && entry.title) ? entry.title : (typeof entry === 'string' ? entry : url);
-                        var u = url.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-                        html += '<div class="archive-item"><a href="' + u + '" target="_blank">' + title.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a><button class="unarchive-btn" onclick="' + opts.actionFn + '(\\'' + u.replace(/'/g,'&#39;') + '\\')">' + opts.buttonLabel + '</button></div>';
+                    urls.forEach(url => {
+                        const entry = items[url];
+                        const title = (entry && entry.title) ? entry.title : (typeof entry === 'string' ? entry : url);
+                        const escaped = url.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                        html += '<div class="archive-item">'
+                            + '<a href="' + escaped + '" target="_blank">' + title.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a>'
+                            + '<button class="unarchive-btn" onclick="' + opts.actionFn + '(\\'' + escaped.replace(/'/g,'&#39;') + '\\')">' + opts.buttonLabel + '</button>'
+                            + '</div>';
                     });
                 }
                 popup.innerHTML = html;
@@ -672,33 +732,31 @@ ${commentedIssueRows}
         }
 
         function restoreItem(url, opts) {
-            var ov = document.getElementById('archive-overlay');
-            var pp = document.getElementById('archive-popup');
-            if (ov) ov.remove();
-            if (pp) pp.remove();
+            document.getElementById('archive-overlay')?.remove();
+            document.getElementById('archive-popup')?.remove();
 
             fetch(opts.apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(opts.postBody(url))
-            }).then(function(r) { return r.json(); }).then(function(d) {
-                if (d.error) throw new Error(d.error);
-                var rows = document.querySelectorAll('#tab-correspondence tr[data-url="' + url.replace(/"/g, '\\\\"') + '"]');
-                rows.forEach(function(row) {
-                    opts.attrs.forEach(function(a) { row.removeAttribute(a); });
+            }).then(resp => resp.json()).then(data => {
+                if (data.error) throw new Error(data.error);
+                const rows = document.querySelectorAll('#tab-correspondence tr[data-url="' + url.replace(/"/g, '\\\\"') + '"]');
+                rows.forEach(row => {
+                    opts.attrs.forEach(attr => row.removeAttribute(attr));
                     row.style.display = '';
                     updateHeadingCount(row, 1);
                     if (opts.onRow) opts.onRow(row);
-                    var idx = parseInt(row.getAttribute('data-idx'));
-                    if (!isNaN(idx) && !enqueued[idx]) {
-                        enqueued[idx] = true;
-                        pendingEnqueue.push(idx);
+                    const rowIdx = parseInt(row.getAttribute('data-idx'));
+                    if (!isNaN(rowIdx) && !enqueued[rowIdx]) {
+                        enqueued[rowIdx] = true;
+                        pendingEnqueue.push(rowIdx);
                         if (!enqueueTimer) enqueueTimer = setTimeout(flushEnqueue, 50);
                     }
                 });
                 updateInfoCount(opts.infoPrefix, -1);
                 updateCorrespondenceTab();
-                if (d[opts.remainingKey] > 0) opts.reopenFn();
+                if (data[opts.remainingKey] > 0) opts.reopenFn();
             });
         }
 
@@ -712,7 +770,7 @@ ${commentedIssueRows}
         function unarchiveItem(url) {
             restoreItem(url, {
                 apiUrl: '/api/correspondence-archive',
-                postBody: function(u) { return { url: u, action: 'unarchive' }; },
+                postBody: u => ({ url: u, action: 'unarchive' }),
                 attrs: ['data-archived'],
                 infoPrefix: 'archive',
                 remainingKey: 'archivedCount',
@@ -723,16 +781,16 @@ ${commentedIssueRows}
         function markImportant(url) {
             restoreItem(url, {
                 apiUrl: '/api/correspondence-unimportant',
-                postBody: function(u) { return { url: u, action: 'mark-important' }; },
+                postBody: u => ({ url: u, action: 'mark-important' }),
                 attrs: ['data-unimportant'],
                 infoPrefix: 'unimportant',
                 remainingKey: 'unimportantCount',
                 reopenFn: showUnimportant,
-                onRow: function(row) {
+                onRow: row => {
                     row.setAttribute('data-marked-important', '1');
-                    var titleCol = row.querySelector('.title-col');
+                    const titleCol = row.querySelector('.title-col');
                     if (titleCol && !titleCol.querySelector('.important-badge')) {
-                        var badge = document.createElement('span');
+                        const badge = document.createElement('span');
                         badge.className = 'important-badge';
                         badge.textContent = 'marked as important';
                         titleCol.appendChild(badge);
@@ -742,193 +800,184 @@ ${commentedIssueRows}
         }
 
         function archiveItem(url, el) {
-            var row = el.closest('tr');
-            var link = row.querySelector('.title-col a');
-            var title = link ? link.textContent : url;
-            var lastCommentAt = row.getAttribute('data-last-comment') || null;
-            var badge = row.querySelector('.unarchived-badge');
-            if (badge) badge.remove();
+            const row = el.closest('tr');
+            const link = row.querySelector('.title-col a');
+            const title = link ? link.textContent : url;
+            const lastCommentAt = row.getAttribute('data-last-comment') || null;
+            row.querySelector('.unarchived-badge')?.remove();
             row.setAttribute('data-archived', '1');
             row.style.display = 'none';
             updateHeadingCount(row, -1);
             updateCorrespondenceTab();
-            updateInfoCount('archive',1);
+            updateInfoCount('archive', 1);
             fetch('/api/correspondence-archive', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url, action: 'archive', title: title, lastCommentAt: lastCommentAt })
-            }).then(function(r) { return r.json(); }).then(function(d) {
-                if (d.error) throw new Error(d.error);
+                body: JSON.stringify({ url, action: 'archive', title, lastCommentAt })
+            }).then(resp => resp.json()).then(data => {
+                if (data.error) throw new Error(data.error);
             });
         }
 
 
 
         // Connect to AI status stream
-        var es = new EventSource('/api/ai-stream');
-        var phaseTimers = {};
+        const es = new EventSource('/api/ai-stream');
+        const phaseTimers = {};
 
-        function onSSE(source, event, handler) {
-            source.addEventListener(event, function(e) {
-                var d = JSON.parse(e.data);
-                if (d.error) { console.error(d.error); return; }
-                handler(d);
+        const onSSE = (source, event, handler) => {
+            source.addEventListener(event, e => {
+                const data = JSON.parse(e.data);
+                if (data.error) { console.error(data.error); return; }
+                handler(data);
             });
-        }
+        };
 
-        var pendingScanQueue = [];
-        var scanRunning = false;
+        const pendingScanQueue = [];
+        let scanRunning = false;
         function drainScanQueue() {
             if (scanRunning || !pendingScanQueue.length) return;
             scanRunning = true;
-            var idx = pendingScanQueue.shift();
+            const scanIdx = pendingScanQueue.shift();
             fetch('/api/repo-scan', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ index: idx })
-            }).then(function(r) { return r.json(); }).then(function(scan) {
+                body: JSON.stringify({ index: scanIdx })
+            }).then(resp => resp.json()).then(scan => {
                 if (scan.error) throw new Error(scan.error);
-                var match = null;
-                for (var j = 0; j < (scan.clones || []).length; j++) {
-                    var c = scan.clones[j];
-                    if (c.onPRBranch && !c.behindOrigin && !c.diverged) { match = c.path; break; }
-                }
+                const match = (scan.clones || []).find(clone => clone.onPRBranch && !clone.behindOrigin && !clone.diverged);
                 if (!match) return;
-                _clonePaths[idx] = match;
-                var inlineEl = document.getElementById('inline-actions-' + idx);
+                _clonePaths[scanIdx] = match.path;
+                const inlineEl = document.getElementById('inline-actions-' + scanIdx);
                 if (!inlineEl) return;
-                var parts = match.split('/');
-                var homePath = (parts[1] === 'home' || parts[1] === 'Users') ? '~/' + parts.slice(3).join('/') : match;
-                var h = '<span class="clone-badge">' + homePath + '</span>';
-                h += '<span class="inline-action" onclick="inlineChat(' + idx + ')">chat</span>';
-                var ides = (typeof INSTALLED_IDES !== 'undefined') ? INSTALLED_IDES : [];
-                for (var k = 0; k < ides.length; k++) {
-                    var cmd = ides[k].cmd.replaceAll('&','&amp;').replaceAll('"','&quot;');
-                    h += '<span class="inline-action" onclick="inlineIDE(&quot;' + cmd + '&quot;,' + idx + ')">' + ides[k].name.replaceAll('&','&amp;').replaceAll('<','&lt;') + '</span>';
+                const parts = match.path.split('/');
+                const homePath = (parts[1] === 'home' || parts[1] === 'Users') ? '~/' + parts.slice(3).join('/') : match.path;
+                let html = '<span class="clone-badge">' + homePath + '</span>';
+                html += '<span class="inline-action" onclick="inlineChat(' + scanIdx + ')">chat</span>';
+                const ides = (typeof INSTALLED_IDES !== 'undefined') ? INSTALLED_IDES : [];
+                for (const ide of ides) {
+                    const cmd = ide.cmd.replaceAll('&','&amp;').replaceAll('"','&quot;');
+                    html += '<span class="inline-action" onclick="inlineIDE(&quot;' + cmd + '&quot;,' + scanIdx + ')">' + ide.name.replaceAll('&','&amp;').replaceAll('<','&lt;') + '</span>';
                 }
-                inlineEl.innerHTML = h;
-            }).finally(function() {
+                inlineEl.innerHTML = html;
+            }).finally(() => {
                 scanRunning = false;
                 drainScanQueue();
             });
         }
 
-        onSSE(es, 'ai-phase', function(d) {
-            var cell = document.getElementById('status-' + d.index);
+        onSSE(es, 'ai-phase', data => {
+            const cell = document.getElementById('status-' + data.index);
             if (!cell) return;
-            var statusSpan = cell.querySelector('.status-text');
+            const statusSpan = cell.querySelector('.status-text');
             if (!statusSpan) return;
-            var branchCell = document.getElementById('branch-' + d.index);
-            var startTime = Date.now();
-            if (phaseTimers[d.index]) clearInterval(phaseTimers[d.index]);
-            function update() {
-                var elapsed = Math.floor((Date.now() - startTime) / 1000);
-                statusSpan.textContent = 'Running "' + d.phase + '" for ' + elapsed + 's';
+            const branchCell = document.getElementById('branch-' + data.index);
+            const startTime = Date.now();
+            if (phaseTimers[data.index]) clearInterval(phaseTimers[data.index]);
+            const update = () => {
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                statusSpan.textContent = 'Running "' + data.phase + '" for ' + elapsed + 's';
                 if (branchCell && branchCell.classList.contains('status-loading')) {
-                    branchCell.textContent = 'Running "' + d.phase + '" for ' + elapsed + 's';
+                    branchCell.textContent = 'Running "' + data.phase + '" for ' + elapsed + 's';
                 }
-            }
+            };
             update();
-            phaseTimers[d.index] = setInterval(update, 1000);
+            phaseTimers[data.index] = setInterval(update, 1000);
         });
 
-        onSSE(es, 'pr-details', function(d) {
-            var branchCell = document.getElementById('branch-' + d.index);
+        onSSE(es, 'pr-details', data => {
+            const branchCell = document.getElementById('branch-' + data.index);
             if (branchCell) {
                 branchCell.classList.remove('status-loading');
-                var branch = d.branch;
-                var html = '<span class="branch-name" onclick="copyBranch(this)" title="Click to copy">' + branch.replaceAll('&','&amp;').replaceAll('<','&lt;') + '</span>';
+                const branch = data.branch;
+                let html = '<span class="branch-name" onclick="copyBranch(this)" title="Click to copy">' + branch.replaceAll('&','&amp;').replaceAll('<','&lt;') + '</span>';
                 if (branch) {
-                    var cmd = 'cd ~/' + d.repoShort + ' && git fetch origin ' + branch + ' && git checkout ' + branch;
+                    const cmd = 'cd ~/' + data.repoShort + ' && git fetch origin ' + branch + ' && git checkout ' + branch;
                     html += '<br><span class="checkout-cmd" onclick="copyCmd(this)" data-cmd="' + cmd.replaceAll('"','&quot;') + '">copy git checkout cmd</span>';
                 }
                 branchCell.innerHTML = html;
             }
-            var ciCell = document.getElementById('ci-' + d.index);
+            const ciCell = document.getElementById('ci-' + data.index);
             if (ciCell) {
                 ciCell.classList.remove('status-loading');
-                if (d.failing && d.failing.length) {
-                    ciCell.innerHTML = d.failing.map(function(c) {
-                        var name = (c.name || c.context || 'ci').replace(/^ci\\/circleci:\\s*/i, '').replaceAll('&','&amp;').replaceAll('<','&lt;');
-                        var url = c.detailsUrl || c.targetUrl || '';
+                if (data.failing && data.failing.length) {
+                    ciCell.innerHTML = data.failing.map(check => {
+                        const name = (check.name || check.context || 'ci').replace(/^ci\\/circleci:\\s*/i, '').replaceAll('&','&amp;').replaceAll('<','&lt;');
+                        const url = check.detailsUrl || check.targetUrl || '';
                         return url ? '<a class="ci-link" href="' + url.replaceAll('"','&quot;') + '">' + name + '</a>' : '<span class="ci-link">' + name + '</span>';
                     }).join('<br>');
                 } else {
                     ciCell.textContent = '';
                 }
             }
-            pendingScanQueue.push(d.index); drainScanQueue();
+            pendingScanQueue.push(data.index); drainScanQueue();
         });
 
-        onSSE(es, 'ai-log', function(d) {
-            var log = document.getElementById('ai-log-' + d.index);
-            log.textContent += d.text;
-            var btn = log.parentNode.querySelector('.copy-prompt');
-            var tooltip = document.getElementById('prompt-tooltip-' + d.index);
-            if (tooltip) tooltip.textContent = log.textContent;
+        onSSE(es, 'ai-log', data => {
+            const logEl = document.getElementById('ai-log-' + data.index);
+            logEl.textContent += data.text;
+            const tooltip = document.getElementById('prompt-tooltip-' + data.index);
+            if (tooltip) tooltip.textContent = logEl.textContent;
         });
 
-        onSSE(es, 'ai-done', function(d) {
-            if (phaseTimers[d.index]) { clearInterval(phaseTimers[d.index]); delete phaseTimers[d.index]; }
-            var cell = document.getElementById('status-' + d.index);
-            if (d.lastCommentAt) {
-                var row = cell.closest('tr');
-                if (row) row.setAttribute('data-last-comment', d.lastCommentAt);
+        onSSE(es, 'ai-done', data => {
+            if (phaseTimers[data.index]) { clearInterval(phaseTimers[data.index]); delete phaseTimers[data.index]; }
+            const cell = document.getElementById('status-' + data.index);
+            if (data.lastCommentAt) {
+                const row = cell.closest('tr');
+                if (row) row.setAttribute('data-last-comment', data.lastCommentAt);
             }
-            var logDiv = document.getElementById('ai-log-' + d.index);
-            logDiv.textContent += '\\\\n--- Result ---\\\\n' + JSON.stringify({statusText: d.statusText, statusClass: d.statusClass, correspondence: d.correspondence}, null, 2);
-            var btn = cell.querySelector('.copy-prompt');
-            if (btn) btn.setAttribute('data-preview', logDiv.textContent.slice(0, 500) + (logDiv.textContent.length > 500 ? '...' : ''));
-            var statusSpan = cell.querySelector('.status-text');
+            const logDiv = document.getElementById('ai-log-' + data.index);
+            logDiv.textContent += '\\\\n--- Result ---\\\\n' + JSON.stringify({statusText: data.statusText, statusClass: data.statusClass, correspondence: data.correspondence}, null, 2);
+            const copyBtn = cell.querySelector('.copy-prompt');
+            if (copyBtn) copyBtn.setAttribute('data-preview', logDiv.textContent.slice(0, 500) + (logDiv.textContent.length > 500 ? '...' : ''));
+            const statusSpan = cell.querySelector('.status-text');
             statusSpan.className = 'status-text';
-            statusSpan.textContent = d.statusText;
-            cell.className = 'status-col status-' + d.statusClass;
+            statusSpan.textContent = data.statusText;
+            cell.className = 'status-col status-' + data.statusClass;
             // Render correspondence citations
-            var corrDiv = document.getElementById('corr-' + d.index);
-            if (corrDiv && d.correspondence && d.correspondence.length) {
-                var html = '';
-                for (var i = 0; i < d.correspondence.length; i++) {
-                    var c = d.correspondence[i];
-                    var author = (c.author || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                    var text = (c.text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-                    var textHtml = c.url ? '<a href="' + c.url + '" target="_blank">' + text + '</a>' : text;
-                    html += '<div class="corr-entry"><span class="corr-author">@' + author + ':</span> ' + textHtml + '</div>';
-                }
-                corrDiv.innerHTML = html;
+            const corrDiv = document.getElementById('corr-' + data.index);
+            if (corrDiv && data.correspondence && data.correspondence.length) {
+                corrDiv.innerHTML = data.correspondence.map(entry => {
+                    const author = (entry.author || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    const text = (entry.text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    const textHtml = entry.url ? '<a href="' + entry.url + '" target="_blank">' + text + '</a>' : text;
+                    return '<div class="corr-entry"><span class="corr-author">@' + author + ':</span> ' + textHtml + '</div>';
+                }).join('');
             }
-            var archBtn = document.getElementById('archive-btn-' + d.index);
+            const archBtn = document.getElementById('archive-btn-' + data.index);
             if (archBtn) {
-                var urlEsc = archBtn.closest('tr').getAttribute('data-url');
+                const urlEsc = archBtn.closest('tr').getAttribute('data-url');
                 archBtn.classList.remove('action-btn-disabled');
                 archBtn.setAttribute('onclick', "archiveItem('" + urlEsc.replace(/'/g, '&#39;') + "', this)");
                 archBtn.innerHTML = 'ARCHIVE<span class="archive-tooltip">YOU WILL NOT SEE UPDATES FOR THIS PR!!!</span>';
             }
             // AI says this item is unimportant — hide and update info (unless user marked it important)
-            if (d.autoArchive) {
-                var aiRow = cell.closest('tr');
+            if (data.autoArchive) {
+                const aiRow = cell.closest('tr');
                 if (aiRow && !aiRow.getAttribute('data-archived') && !aiRow.getAttribute('data-unimportant') && !aiRow.getAttribute('data-marked-important')) {
                     aiRow.setAttribute('data-unimportant', '1');
                     aiRow.style.display = 'none';
                     updateHeadingCount(aiRow, -1);
                     updateCorrespondenceTab();
-                    updateInfoCount('unimportant',1);
+                    updateInfoCount('unimportant', 1);
                 }
             }
         });
 
-        onSSE(es, 'ai-error', function() {});
+        onSSE(es, 'ai-error', () => {});
 
         function handleNewComments(url, opts) {
-            var rows = document.querySelectorAll('#tab-correspondence tr[data-url="' + url.replace(/"/g, '\\\\"') + '"]');
-            rows.forEach(function(row) {
-                opts.attrs.forEach(function(a) { row.removeAttribute(a); });
+            const rows = document.querySelectorAll('#tab-correspondence tr[data-url="' + url.replace(/"/g, '\\\\"') + '"]');
+            rows.forEach(row => {
+                opts.attrs.forEach(attr => row.removeAttribute(attr));
                 row.style.display = '';
                 updateHeadingCount(row, 1);
                 if (opts.onRow) opts.onRow(row);
-                var idx = parseInt(row.getAttribute('data-idx'));
-                if (!isNaN(idx) && !enqueued[idx]) {
-                    enqueued[idx] = true;
-                    pendingEnqueue.push(idx);
+                const rowIdx = parseInt(row.getAttribute('data-idx'));
+                if (!isNaN(rowIdx) && !enqueued[rowIdx]) {
+                    enqueued[rowIdx] = true;
+                    pendingEnqueue.push(rowIdx);
                     if (!enqueueTimer) enqueueTimer = setTimeout(flushEnqueue, 50);
                 }
             });
@@ -936,14 +985,14 @@ ${commentedIssueRows}
             updateCorrespondenceTab();
         }
 
-        onSSE(es, 'auto-unarchive', function(d) {
-            handleNewComments(d.url, {
+        onSSE(es, 'auto-unarchive', data => {
+            handleNewComments(data.url, {
                 attrs: ['data-archived'],
                 infoPrefix: 'archive',
-                onRow: function(row) {
-                    var titleCol = row.querySelector('.title-col');
+                onRow: row => {
+                    const titleCol = row.querySelector('.title-col');
                     if (titleCol && !titleCol.querySelector('.unarchived-badge')) {
-                        var badge = document.createElement('span');
+                        const badge = document.createElement('span');
                         badge.className = 'unarchived-badge';
                         badge.textContent = 'unarchived: new comments';
                         titleCol.appendChild(badge);
@@ -952,51 +1001,48 @@ ${commentedIssueRows}
             });
         });
 
-        onSSE(es, 'reset-unimportant', function(d) {
-            handleNewComments(d.url, {
+        onSSE(es, 'reset-unimportant', data => {
+            handleNewComments(data.url, {
                 attrs: ['data-unimportant', 'data-marked-important'],
                 infoPrefix: 'unimportant',
-                onRow: function(row) {
-                    var badge = row.querySelector('.important-badge');
-                    if (badge) badge.remove();
+                onRow: row => {
+                    row.querySelector('.important-badge')?.remove();
                 },
             });
         });
 
-        es.onerror = function() {
+        es.onerror = () => {
             if (es.readyState === EventSource.CLOSED) return;
             es.close();
             console.error('AI stream connection lost');
         };
 
-        document.querySelectorAll('.status-text').forEach(function(el) {
-            el.classList.add('loading');
-        });
+        document.querySelectorAll('.status-text').forEach(el => el.classList.add('loading'));
 
         // Lazy-load: only request AI processing for items visible in the viewport
-        var enqueued = {};
-        var pendingEnqueue = [];
-        var enqueueTimer = null;
+        const enqueued = {};
+        const pendingEnqueue = [];
+        let enqueueTimer = null;
 
         function flushEnqueue() {
             enqueueTimer = null;
             if (pendingEnqueue.length === 0) return;
-            var indices = pendingEnqueue.slice();
-            pendingEnqueue = [];
+            const indices = pendingEnqueue.slice();
+            pendingEnqueue.length = 0;
             fetch('/api/ai-enqueue', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({indices: indices})
-            }).then(function(r) { if (!r.ok) return r.json().then(function(d) { throw new Error(d.error || 'HTTP ' + r.status); }); });
+                body: JSON.stringify({ indices })
+            }).then(resp => { if (!resp.ok) return resp.json().then(data => { throw new Error(data.error || 'HTTP ' + resp.status); }); });
         }
 
-        var observer = new IntersectionObserver(function(entries) {
-            entries.forEach(function(entry) {
+        const observer = new IntersectionObserver(entries => {
+            entries.forEach(entry => {
                 if (!entry.isIntersecting) return;
-                var idx = parseInt(entry.target.getAttribute('data-idx'));
-                if (isNaN(idx) || enqueued[idx]) return;
-                enqueued[idx] = true;
-                pendingEnqueue.push(idx);
+                const rowIdx = parseInt(entry.target.getAttribute('data-idx'));
+                if (isNaN(rowIdx) || enqueued[rowIdx]) return;
+                enqueued[rowIdx] = true;
+                pendingEnqueue.push(rowIdx);
                 observer.unobserve(entry.target);
             });
             if (pendingEnqueue.length > 0 && !enqueueTimer) {
@@ -1004,16 +1050,16 @@ ${commentedIssueRows}
             }
         }, { rootMargin: '200%' });
 
-        document.querySelectorAll('[id^="status-"]').forEach(function(cell) {
-            var idx = parseInt(cell.id.replace('status-', ''));
-            var row = cell.closest('tr');
+        document.querySelectorAll('[id^="status-"]').forEach(cell => {
+            const cellIdx = parseInt(cell.id.replace('status-', ''));
+            const row = cell.closest('tr');
             if (row) {
-                row.setAttribute('data-idx', idx);
+                row.setAttribute('data-idx', cellIdx);
                 observer.observe(row);
             }
         });
     </script>
-    <script>var INSTALLED_IDES = ${JSON.stringify(installedIDEs)};</script>
+    <script>const INSTALLED_IDES = ${JSON.stringify(installedIDEs)};</script>
     <script src="/public/repo-picker.js"></script>
 </body>
 </html>`;

@@ -1,11 +1,11 @@
 // ─── Styles (injected once) ────────────────────────────────────────────
 
-var _dialogStylesInjected = false;
+let _dialogStylesInjected = false;
 function ensureStyles() {
   if (_dialogStylesInjected) return;
   _dialogStylesInjected = true;
-  var s = document.createElement('style');
-  s.textContent = '\
+  const style = document.createElement('style');
+  style.textContent = '\
 .dlg-overlay { position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:299; }\
 .dlg-modal { position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;z-index:300;max-width:1200px;width:90%;max-height:80vh;overflow-y:auto;font-size:12px;color:#c9d1d9;font-family:"JetBrains Mono",monospace; }\
 .dlg-title { font-size:14px;font-weight:600;color:#c9d1d9;margin:0 0 4px 0; }\
@@ -39,50 +39,47 @@ function ensureStyles() {
 .dlg-clone-input { flex:1;background:#0d1117;border:1px solid #30363d;border-radius:4px;padding:4px 8px;color:#c9d1d9;font-family:inherit;font-size:11px;outline:none; }\
 .dlg-clone-input:focus { border-color:#58a6ff; }\
 ';
-  document.head.appendChild(s);
+  document.head.appendChild(style);
 }
 
 // ─── Dialog core ───────────────────────────────────────────────────────
 
 function createDialog() {
   ensureStyles();
-  var overlay = document.createElement('div');
+  const overlay = document.createElement('div');
   overlay.className = 'dlg-overlay';
-  var modal = document.createElement('div');
+  const modal = document.createElement('div');
   modal.className = 'dlg-modal';
   document.body.appendChild(overlay);
   document.body.appendChild(modal);
 
-  function close() {
-    overlay.remove();
-    modal.remove();
-  }
+  const close = () => { overlay.remove(); modal.remove(); };
   overlay.onclick = close;
-  return { modal: modal, close: close };
+  return { modal, close };
 }
 
 // ─── Repo selection dialog ──────────────────────────────────────────────
 
 function showRepoSelectionDialog(index) {
-  var dlg = createDialog();
+  const dlg = createDialog();
   dlg.modal.innerHTML = '<div class="dlg-title">Scanning local repositories\u2026</div>' +
     '<div style="padding:12px 0"><span class="dlg-spinner"></span> Looking for matching clones</div>';
 
   fetch('/api/repo-scan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ index: index, rescan: true })
+    body: JSON.stringify({ index, rescan: true })
   })
-    .then(function (r) { return r.json(); })
-    .then(function (data) {
+    .then(resp => resp.json())
+    .then(data => {
       if (data.error) throw new Error(data.error);
       renderRepoSelectionDialog(dlg, data, index);
     });
 }
 
 function renderRepoSelectionDialog(dlg, data, index) {
-  var type = data.isIssue ? 'Issue' : 'PR';
-  var html = '<div class="dlg-title">' + esc(type + ' #' + data.number + ' \u2014 ' + data.title) + '</div>';
+  const type = data.isIssue ? 'Issue' : 'PR';
+  let html = '<div class="dlg-title">' + esc(type + ' #' + data.number + ' \u2014 ' + data.title) + '</div>';
   if (data.aiStatus) {
     html += '<div class="dlg-subtitle">' + esc(data.aiStatus) + '</div>';
   }
@@ -92,8 +89,8 @@ function renderRepoSelectionDialog(dlg, data, index) {
   } else {
     html += '<div class="dlg-section">Local clones of ' + esc(data.repo) + '</div>';
     html += '<ul class="dlg-clone-list">';
-    for (var i = 0; i < data.clones.length; i++) {
-      html += renderCloneRow(data.clones[i], data.branch);
+    for (const clone of data.clones) {
+      html += renderCloneRow(clone, data.branch);
     }
     html += '</ul>';
   }
@@ -112,26 +109,25 @@ function renderRepoSelectionDialog(dlg, data, index) {
   dlg.modal.innerHTML = html;
 
   // "New clone" button reveals an input field
-  var newCloneBtn = dlg.modal.querySelector('#dlg-new-clone-btn');
+  const newCloneBtn = dlg.modal.querySelector('#dlg-new-clone-btn');
   if (newCloneBtn) {
-    newCloneBtn.onclick = function () {
+    newCloneBtn.onclick = () => {
       newCloneBtn.style.display = 'none';
-      var area = dlg.modal.querySelector('#dlg-new-clone-area');
+      const area = dlg.modal.querySelector('#dlg-new-clone-area');
       area.innerHTML = '<div class="dlg-clone-input-row">' +
         '<input class="dlg-clone-input" id="dlg-clone-path" value="' + esc(data.suggestedClonePath || '') + '" />' +
         '<button class="dlg-btn dlg-btn-primary" id="dlg-clone-confirm">Clone</button>' +
         '</div>';
-      var input = area.querySelector('#dlg-clone-path');
+      const input = area.querySelector('#dlg-clone-path');
       input.focus();
       input.select();
-      area.querySelector('#dlg-clone-confirm').onclick = function () {
-        var path = input.value.trim();
-        if (!path) return;
-        launchClone(dlg, index, path);
+      area.querySelector('#dlg-clone-confirm').onclick = () => {
+        const path = input.value.trim();
+        if (path) launchClone(dlg, index, path);
       };
-      input.onkeydown = function (e) {
-        if (e.key === 'Enter') {
-          var path = input.value.trim();
+      input.onkeydown = event => {
+        if (event.key === 'Enter') {
+          const path = input.value.trim();
           if (path) launchClone(dlg, index, path);
         }
       };
@@ -139,27 +135,30 @@ function renderRepoSelectionDialog(dlg, data, index) {
   }
 
   // Wire up sync buttons (checkout/pull)
-  dlg.modal.querySelectorAll('[data-sync]').forEach(function (btn) {
-    btn.onclick = function () {
-      var action = btn.getAttribute('data-sync');
-      var clonePath = btn.getAttribute('data-clone');
-      var branchName = btn.getAttribute('data-branch');
+  dlg.modal.querySelectorAll('[data-sync]').forEach(btn => {
+    btn.onclick = () => {
+      const action = btn.getAttribute('data-sync');
+      const clonePath = btn.getAttribute('data-clone');
+      const branchName = btn.getAttribute('data-branch');
       btn.disabled = true;
       btn.textContent = action === 'pull' ? 'Pulling\u2026' : 'Checking out\u2026';
       fetch('/api/repo-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: action, clonePath: clonePath, branch: branchName })
+        body: JSON.stringify({ action, clonePath, branch: branchName })
       })
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (d.error) throw new Error(d.error);
-          if (d.diverged) {
-            var row = btn.closest('.dlg-clone-row');
+        .then(resp => resp.json())
+        .then(respData => {
+          if (respData.error) throw new Error(respData.error);
+          if (respData.diverged) {
+            const row = btn.closest('.dlg-clone-row');
             if (row) {
-              // Re-render with diverged flag using the same renderCloneRow
-              var tmp = document.createElement('ul');
-              tmp.innerHTML = renderCloneRow({ path: clonePath, currentBranch: row.querySelector('.dlg-clone-branch').textContent.replace(/[()]/g, ''), onPRBranch: true, dirty: false, changedFiles: [], diverged: true, behindOrigin: false }, branchName);
+              const tmp = document.createElement('ul');
+              tmp.innerHTML = renderCloneRow({
+                path: clonePath,
+                currentBranch: row.querySelector('.dlg-clone-branch').textContent.replace(/[()]/g, ''),
+                onPRBranch: true, dirty: false, changedFiles: [], diverged: true, behindOrigin: false
+              }, branchName);
               row.replaceWith(tmp.firstElementChild);
             }
             return;
@@ -171,14 +170,14 @@ function renderRepoSelectionDialog(dlg, data, index) {
   });
 
   // Wire up cancel button
-  dlg.modal.querySelectorAll('[data-action="cancel"]').forEach(function (btn) {
-    btn.onclick = function () { dlg.close(); };
+  dlg.modal.querySelectorAll('[data-action="cancel"]').forEach(btn => {
+    btn.onclick = () => dlg.close();
   });
 }
 
 function renderCloneRow(clone, branch) {
-  var homePath = clone.path.replace(/^\/Users\/[^/]+/, '~');
-  var html = '<li class="dlg-clone-row" style="flex-wrap:wrap">';
+  const homePath = clone.path.replace(/^\/Users\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
+  let html = '<li class="dlg-clone-row" style="flex-wrap:wrap">';
 
   // Top line: path, branch, badges
   html += '<span class="dlg-clone-path" title="' + esc(clone.path) + '">' + esc(homePath) + '</span>';
@@ -204,8 +203,8 @@ function renderCloneRow(clone, branch) {
   } else if (clone.dirty && (clone.behindOrigin || !clone.onPRBranch)) {
     html += '<span style="color:#f85149;font-size:10px">dirty \u2014 commit or stash first</span>';
   } else if (clone.behindOrigin || !clone.onPRBranch) {
-    var syncLabel = !clone.onPRBranch ? 'Checkout branch' : 'Pull latest';
-    var syncAction = !clone.onPRBranch ? 'checkout' : 'pull';
+    const syncLabel = !clone.onPRBranch ? 'Checkout branch' : 'Pull latest';
+    const syncAction = !clone.onPRBranch ? 'checkout' : 'pull';
     html += '<button class="dlg-btn dlg-btn-primary" data-sync="' + syncAction + '" data-clone="' + esc(clone.path) + '" data-branch="' + esc(branch || '') + '">' + syncLabel + '</button>';
   } else {
     html += '<span class="dlg-badge dlg-badge-clean">ready</span>';
@@ -223,32 +222,32 @@ function renderCloneRow(clone, branch) {
 function updateInlineActions(index, clonePath) {
   // Clear inline actions for other PRs that were using this clone
   if (typeof _clonePaths !== 'undefined') {
-    for (var key in _clonePaths) {
+    for (const key in _clonePaths) {
       if (key !== String(index) && _clonePaths[key] === clonePath) {
-        var staleEl = document.getElementById('inline-actions-' + key);
+        const staleEl = document.getElementById('inline-actions-' + key);
         if (staleEl) staleEl.innerHTML = '';
         delete _clonePaths[key];
       }
     }
     _clonePaths[index] = clonePath;
   }
-  var inlineEl = document.getElementById('inline-actions-' + index);
+  const inlineEl = document.getElementById('inline-actions-' + index);
   if (!inlineEl) return;
-  var parts = clonePath.split('/');
-  var homePath = (parts[1] === 'home' || parts[1] === 'Users') ? '~/' + parts.slice(3).join('/') : clonePath;
-  var h = '<span class="clone-badge">' + esc(homePath) + '</span>';
-  h += '<span class="inline-action" onclick="inlineChat(' + index + ')">chat</span>';
-  var ides = (typeof INSTALLED_IDES !== 'undefined') ? INSTALLED_IDES : [];
-  for (var k = 0; k < ides.length; k++) {
-    var cmd = ides[k].cmd.replaceAll('&','&amp;').replaceAll('"','&quot;');
-    h += '<span class="inline-action" onclick="inlineIDE(&quot;' + cmd + '&quot;,' + index + ')">' + ides[k].name.replaceAll('&','&amp;').replaceAll('<','&lt;') + '</span>';
+  const parts = clonePath.split('/');
+  const homePath = (parts[1] === 'home' || parts[1] === 'Users') ? '~/' + parts.slice(3).join('/') : clonePath;
+  let html = '<span class="clone-badge">' + esc(homePath) + '</span>';
+  html += '<span class="inline-action" onclick="inlineChat(' + index + ')">chat</span>';
+  const ides = (typeof INSTALLED_IDES !== 'undefined') ? INSTALLED_IDES : [];
+  for (const ide of ides) {
+    const cmd = ide.cmd.replaceAll('&','&amp;').replaceAll('"','&quot;');
+    html += '<span class="inline-action" onclick="inlineIDE(&quot;' + cmd + '&quot;,' + index + ')">' + ide.name.replaceAll('&','&amp;').replaceAll('<','&lt;') + '</span>';
   }
-  inlineEl.innerHTML = h;
+  inlineEl.innerHTML = html;
 }
 
 function launchClone(dlg, index, clonePath) {
-  dlg.modal.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
-  var statusDiv = document.createElement('div');
+  dlg.modal.querySelectorAll('button').forEach(btn => { btn.disabled = true; });
+  const statusDiv = document.createElement('div');
   statusDiv.style.cssText = 'padding:8px 0;font-size:11px;color:#8b949e;';
   statusDiv.innerHTML = '<span class="dlg-spinner"></span> Cloning\u2026';
   dlg.modal.querySelector('.dlg-footer').before(statusDiv);
@@ -256,18 +255,18 @@ function launchClone(dlg, index, clonePath) {
   fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ index: index, action: 'clone', clonePath: clonePath })
+    body: JSON.stringify({ index, action: 'clone', clonePath })
   })
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
-      if (d.error) throw new Error(d.error);
+    .then(resp => resp.json())
+    .then(data => {
+      if (data.error) throw new Error(data.error);
       updateInlineActions(index, clonePath);
       dlg.close();
     });
 }
 
-function esc(s) {
-  var d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
+function esc(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
