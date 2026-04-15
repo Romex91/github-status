@@ -1,7 +1,8 @@
-import { runCmd, CHAOS, CMD_TIMEOUT, setCmdLogHook } from './helpers.js';
+import { runCmd, gh, daysSince, CHAOS, CMD_TIMEOUT, setCmdLogHook } from './helpers.js';
 import { homedir } from 'node:os';
 import { readCacheEntry, writeCacheEntry, hashPrompt, cleanAiCache } from './ai-cache.js';
 import { fetchIssueDetails, fetchPRSummary, fetchPRPromptData, fetchRecentComments } from './github-api.js';
+import { checkDivergence } from './repo-scan.js';
 import { cleanChatPrompts } from './launch-chat.js';
 
 // === Timeline / Context / Prompt Builders ===
@@ -344,6 +345,40 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
     const pr = allPRs[index];
     if (pr.fetchError) return;
 
+    // Checkout items: fetch real remote HEAD + discover PR for this branch
+    if (pr.section === 'checkout') {
+      if (pr._checkoutSkipAI) return; // default branch, no PR possible
+      // Refine diverge status with real remote HEAD from GitHub API
+      const remoteHeadSha = await gh('api', `repos/${pr.repo}/branches/${pr._checkoutBranch}`, '--jq', '.commit.sha',
+        { __reason: `remote HEAD: ${pr.repo}#${pr._checkoutBranch}` }, signal).then(s => s.trim() || null, () => null);
+      if (remoteHeadSha) {
+        const localHead = (await runCmd('git', ['rev-parse', 'HEAD'], { cwd: pr._checkoutPath, reason: 'local HEAD' }).catch(() => '')).trim();
+        if (localHead === remoteHeadSha) {
+          pr._checkoutDivergeStatus = 'synced';
+        } else if (localHead) {
+          pr._checkoutDivergeStatus = await checkDivergence(pr._checkoutPath, localHead, remoteHeadSha) || 'unsynced';
+        }
+      }
+      // Discover PR for this branch
+      itemPhase[index] = `gh pr list --head ${pr._checkoutBranch}`;
+      sendIfActive(index, 'ai-phase', { index, phase: itemPhase[index] });
+      const raw = await gh('pr', 'list', '--repo', pr.repo, '--head', pr._checkoutBranch, '--state', 'all', '--json', 'number,title,url,state,headRefName,updatedAt', '--limit', '1', { __reason: `checkout PR: ${pr.repo}#${pr._checkoutBranch}` }, signal).catch(() => '[]');
+      const prs = JSON.parse(raw);
+      if (!prs.length) {
+        sendIfActive(index, 'pr-details', { index, branch: pr._checkoutBranch, repoShort: pr.repo.split('/').pop(), failing: [], divergeStatus: pr._checkoutDivergeStatus, dirty: pr._checkoutDirty, changedCount: pr._checkoutChangedFiles });
+        sendIfActive(index, 'ai-done', { index, statusText: 'no PR', statusClass: 'warning' });
+        return;
+      }
+      const found = prs[0];
+      pr.title = found.title;
+      pr.html_url = found.url;
+      pr.number = found.number;
+      pr.state = found.state?.toLowerCase();
+      pr.updated_at = found.updatedAt;
+      pr.days = daysSince(found.updatedAt);
+      pr._checkoutPRDiscovered = true;
+    }
+
     // Lazy-load all details (deferred from Phase 1 for faster table render)
     if (pr.isIssue) {
       itemPhase[index] = `gh issue view ${pr.number} --repo ${pr.repo}`;
@@ -363,7 +398,20 @@ export function handleAIStream(req, res, { allItems, ghUsername, ghVersion, clau
         const s = (c.conclusion || c.state || c.status || '').toUpperCase();
         return s === 'FAILURE' || s === 'ERROR' || s === 'TIMED_OUT';
       });
-      sendIfActive(index, 'pr-details', { index, branch, repoShort, failing });
+      const prDetailsData = { index, branch, repoShort, failing };
+      if (pr._checkoutPRDiscovered) {
+        prDetailsData.prTitle = pr.title;
+        prDetailsData.prUrl = pr.html_url;
+        prDetailsData.prNumber = pr.number;
+        prDetailsData.prState = pr.state;
+        prDetailsData.prDays = pr.days;
+      }
+      if (pr.section === 'checkout') {
+        prDetailsData.divergeStatus = pr._checkoutDivergeStatus;
+        prDetailsData.dirty = pr._checkoutDirty;
+        prDetailsData.changedCount = pr._checkoutChangedFiles;
+      }
+      sendIfActive(index, 'pr-details', prDetailsData);
       if (pr.section === 'mentioned') {
         const myComments = (summary.comments || []).some(c => c.author?.login === ghUsername);
         const myReviews = (summary.reviews || []).some(r => r.author?.login === ghUsername);
