@@ -170,7 +170,7 @@ function renderRepoSelectionDialog(dlg, data, index) {
 }
 
 function renderCloneRow(clone, branch) {
-  const homePath = clone.path.replace(/^\/Users\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
+  const homePath = toHomePath(clone.path);
   let html = '<li class="dlg-clone-row" style="flex-wrap:wrap">';
 
   // Top line: path, branch, badges
@@ -179,18 +179,9 @@ function renderCloneRow(clone, branch) {
   if (clone.onPRBranch) {
     html += makeChip('on branch', 'blue');
   }
-  if (clone.dirty) {
-    html += makeChip('dirty: ' + clone.changedFiles.length + ' file' + (clone.changedFiles.length !== 1 ? 's' : ''), 'yellow');
-  } else {
-    html += makeChip('clean', 'green');
-  }
-  if (clone.divergeStatus === 'diverged') {
-    html += makeChip('diverged', 'red');
-  } else if (clone.divergeStatus === 'behind') {
-    html += makeChip('behind remote', 'yellow');
-  } else if (clone.divergeStatus === 'ahead') {
-    html += makeChip('ahead of remote', 'blue');
-  }
+  html += renderCloneChips(clone, {
+    dirtyLabel: count => 'dirty: ' + count + ' file' + (count !== 1 ? 's' : '')
+  });
 
   // Action buttons row
   html += '<div class="dlg-actions" style="width:100%;margin-top:4px">';

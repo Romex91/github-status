@@ -17,6 +17,7 @@ const PORT = process.env.PORT || 7777;
 const DATA_DIR = join(PROJECT_DIR, 'data');
 const PERIOD_FILE = join(DATA_DIR, 'period.json');
 const VALID_PERIODS = ['7d', '30d', '90d', 'all'];
+const DEFAULT_BRANCHES = ['main', 'master', 'develop', 'development'];
 
 function readPeriod() {
   if (existsSync(PERIOD_FILE)) {
@@ -257,7 +258,7 @@ async function handleStatusStream(req, res) {
     pendingPRData = allItems;
 
     // Add all local checkouts to allItems for async PR discovery in Phase 2
-    const defaultBranches = new Set(['main', 'master', 'develop', 'development']);
+    const defaultBranchSet = new Set(DEFAULT_BRANCHES);
     if (cloneIdx) {
       const checkoutEntries = [];
       for (const [repoKey, clones] of cloneIdx) {
@@ -276,7 +277,7 @@ async function handleStatusStream(req, res) {
             _checkoutBranch: clone.currentBranch,
             _checkoutDirty: clone.dirty,
             _checkoutChangedFiles: clone.changedFiles.length,
-            _checkoutSkipAI: !clone.currentBranch || defaultBranches.has(clone.currentBranch),
+            _checkoutSkipAI: !clone.currentBranch || defaultBranchSet.has(clone.currentBranch),
             _checkoutDivergeStatus: !clone.trackingHead ? 'no-remote' : clone.localHead === clone.trackingHead ? 'synced' : null,
           });
         }
@@ -386,9 +387,11 @@ const server = http.createServer((req, res) => {
       if (pr.section === 'checkout') {
         const checkoutPath = clonePath || pr._checkoutPath;
         const branch = (await runCmd('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: checkoutPath })).trim();
-        const defaultBranch = await runCmd('git', ['rev-parse', '--verify', 'refs/heads/main'], { cwd: checkoutPath }).then(() => 'main').catch(() =>
-          runCmd('git', ['rev-parse', '--verify', 'refs/heads/master'], { cwd: checkoutPath }).then(() => 'master').catch(() => null)
-        );
+        let defaultBranch = null;
+        for (const name of DEFAULT_BRANCHES) {
+          const exists = await runCmd('git', ['rev-parse', '--verify', `refs/heads/${name}`], { cwd: checkoutPath }).then(() => true).catch(() => false);
+          if (exists) { defaultBranch = name; break; }
+        }
         let diff = '';
         if (defaultBranch && branch !== defaultBranch) {
           const mergeBase = (await runCmd('git', ['merge-base', defaultBranch, 'HEAD'], { cwd: checkoutPath })).trim();
@@ -397,9 +400,7 @@ const server = http.createServer((req, res) => {
         } else {
           diff = '(on default branch, no diff)';
         }
-        const originUrl = (await runCmd('git', ['remote', 'get-url', 'origin'], { cwd: checkoutPath }).catch(() => '')).trim();
-        const repoMatch = originUrl.match(/[:\/]([^/]+\/[^/]+?)(?:\.git)?$/);
-        const repo = repoMatch ? repoMatch[1] : 'unknown';
+        const repo = pr.repo;
         await launchChat({
           prompt: `## Diff against ${defaultBranch || 'default branch'} (merge-base)\n\n\`\`\`diff\n${diff}\n\`\`\``,
           url: '',

@@ -125,6 +125,10 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
     grey:   { color: '#8b949e', bg: '#1c2128', border: '#30363d' },
   };
 
+  const stateTones = { open: 'green', merged: 'purple', closed: 'red' };
+
+  const divergeLabels = { ahead: ['ahead of remote', 'blue'], behind: ['behind remote', 'yellow'], diverged: ['diverged', 'red'], 'no-remote': ['no remote', 'muted'] };
+
   function chip(label, tone, extraClass) {
     const p = chipPalette[tone] || chipPalette.grey;
     return ` <span class="chip${extraClass ? ' ' + extraClass : ''}" style="color:${p.color};background:${p.bg};border-color:${p.border}">${label}</span>`;
@@ -132,8 +136,7 @@ export function buildDashboardHtml(myPRs, reviewPRs, assignedIssues, createdIssu
 
   function stateBadge(state) {
     if (!state) return '';
-    const tones = { open: 'green', merged: 'purple', closed: 'red' };
-    return chip(state, tones[state] || 'grey');
+    return chip(state, stateTones[state] || 'grey');
   }
 
   function statusCell(item, globalIndex, prefillActions) {
@@ -713,15 +716,9 @@ ${checkoutRows}
         });
 
         const _clonePaths = {};
-        const CHIP_PALETTE = {
-            green:{color:'#3fb950',bg:'#1a3a1a',border:'#238636'},
-            yellow:{color:'#d29922',bg:'#3d1f00',border:'#9e6a03'},
-            blue:{color:'#58a6ff',bg:'#0c2d6b',border:'#1f6feb'},
-            red:{color:'#f85149',bg:'#3d0a0a',border:'#da3633'},
-            purple:{color:'#a371f7',bg:'#271c4d',border:'#8957e5'},
-            muted:{color:'#484f58',bg:'#161b22',border:'#30363d'},
-            grey:{color:'#8b949e',bg:'#1c2128',border:'#30363d'},
-        };
+        const CHIP_PALETTE = ${JSON.stringify(chipPalette)};
+        const STATE_TONES = ${JSON.stringify(stateTones)};
+        const DIVERGE_LABELS = ${JSON.stringify(divergeLabels)};
         function makeChip(label, tone, extraClass) {
             const p = CHIP_PALETTE[tone] || CHIP_PALETTE.grey;
             return '<span class="chip' + (extraClass ? ' ' + extraClass : '') + '" style="color:' + p.color + ';background:' + p.bg + ';border-color:' + p.border + '">' + label + '</span>';
@@ -751,16 +748,16 @@ ${checkoutRows}
             const parts = path.split('/');
             return (parts[1] === 'home' || parts[1] === 'Users') ? '~/' + parts.slice(3).join('/') : path;
         }
-        function renderCloneChips(clone) {
+        function renderCloneChips(clone, opts) {
             let html = '';
             const count = clone.changedFiles ? clone.changedFiles.length : (clone.changedCount || 0);
             if (clone.dirty) {
-                html += makeChip(count + ' changed', 'yellow');
+                const label = opts && opts.dirtyLabel ? opts.dirtyLabel(count) : (count + ' changed');
+                html += makeChip(label, 'yellow');
             } else {
                 html += makeChip('clean', 'green');
             }
-            const divergeLabels = {ahead:['ahead of remote','blue'],behind:['behind remote','yellow'],diverged:['diverged','red'],'no-remote':['no remote','muted']};
-            const dl = divergeLabels[clone.divergeStatus];
+            const dl = DIVERGE_LABELS[clone.divergeStatus];
             if (dl) html += makeChip(dl[0], dl[1]);
             return html;
         }
@@ -1059,9 +1056,8 @@ ${checkoutRows}
             if (data.prTitle) {
                 const titleCell = document.getElementById('title-' + data.index);
                 if (titleCell) {
-                    const stateTones = {open:'green',merged:'purple',closed:'red'};
                     const prLink = '<a href="' + data.prUrl + '">#' + data.prNumber + ' ' + data.prTitle.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</a>'
-                        + (data.prState ? makeChip(data.prState, stateTones[data.prState] || 'grey') : '');
+                        + (data.prState ? makeChip(data.prState, STATE_TONES[data.prState] || 'grey') : '');
                     titleCell.innerHTML = prLink + '<br>' + titleCell.innerHTML;
                 }
                 const daysCell = document.getElementById('days-' + data.index);
